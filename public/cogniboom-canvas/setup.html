@@ -126,7 +126,7 @@
         <article class="panel">
           <h2>Install</h2>
           <p>Run setup once, then restart your agent client after adding the configuration it prints.</p>
-          <pre>npx @cogniboom/canvas setup</pre>
+          <pre>npx --yes @cogniboom/canvas@latest setup</pre>
 
           <h3>What the helper can access</h3>
           <ul>
@@ -155,7 +155,7 @@
 
           <details open>
             <summary>Claude Code</summary>
-            <div><pre>claude mcp add cogniboom-canvas -- npx @cogniboom/canvas serve</pre></div>
+            <div><pre>claude mcp add cogniboom-canvas -- npx --yes @cogniboom/canvas@latest serve</pre></div>
           </details>
 
           <details>
@@ -164,7 +164,7 @@
   "mcpServers": {
     "cogniboom-canvas": {
       "command": "npx",
-      "args": ["@cogniboom/canvas", "serve"]
+      "args": ["--yes", "@cogniboom/canvas@latest", "serve"]
     }
   }
 }</pre></div>
@@ -174,7 +174,7 @@
             <summary>Codex</summary>
             <div><pre>[mcp_servers.cogniboom_canvas]
 command = "npx"
-args = ["@cogniboom/canvas", "serve"]
+args = ["--yes", "@cogniboom/canvas@latest", "serve"]
 startup_timeout_sec = 20
 tool_timeout_sec = 60</pre></div>
           </details>
@@ -185,7 +185,7 @@ tool_timeout_sec = 60</pre></div>
   "mcpServers": {
     "cogniboom-canvas": {
       "command": "npx",
-      "args": ["@cogniboom/canvas", "serve"]
+      "args": ["--yes", "@cogniboom/canvas@latest", "serve"]
     }
   }
 }</pre></div>
@@ -193,7 +193,7 @@ tool_timeout_sec = 60</pre></div>
 
           <details>
             <summary>HTTP clients</summary>
-            <div><pre>npx @cogniboom/canvas http
+            <div><pre>npx --yes @cogniboom/canvas@latest http
 http://127.0.0.1:3762/mcp</pre></div>
           </details>
         </article>
@@ -202,14 +202,14 @@ http://127.0.0.1:3762/mcp</pre></div>
           <h2>Troubleshooting</h2>
           <ul>
             <li>Restart or reload the agent client after changing MCP config.</li>
-            <li>Run <code>npx @cogniboom/canvas doctor</code>.</li>
+            <li>Run <code>npx --yes @cogniboom/canvas@latest doctor</code>.</li>
             <li>Check <code>http://127.0.0.1:3762/api/health</code>.</li>
             <li>Keep the local Canvas tab open for screenshot capture.</li>
             <li>Use <code>CANVAS_PORT</code> if port 3762 is occupied.</li>
           </ul>
 
           <h3>Update</h3>
-          <pre>npx @cogniboom/canvas@latest setup</pre>
+          <pre>npx --yes @cogniboom/canvas@latest setup</pre>
         </aside>
       </section>
     </main>

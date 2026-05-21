@@ -11,6 +11,7 @@ process.env.COGNIBOOM_CANVAS_PACKAGE_MODE ??= '1';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(__dirname, '..');
 const repoRoot = path.resolve(packageRoot, '..', '..');
+const packageJson = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
 const command = process.argv[2] ?? 'setup';
 const host = '127.0.0.1';
 const port = Number(process.env.CANVAS_PORT ?? 3762);
@@ -19,12 +20,14 @@ const mcpHttpUrl = `${appUrl}/mcp`;
 const localCliPath = path.join(packageRoot, 'bin', 'canvas-mcp.js');
 const localCliCommand = `node "${localCliPath}"`;
 const isRepoCheckout = fsExists(path.join(repoRoot, 'scripts', 'canvas-mcp-server.mjs'));
-const setupCommand = isRepoCheckout ? `${localCliCommand} setup` : 'npx @cogniboom/canvas setup';
-const serveCommand = isRepoCheckout ? `node "${localCliPath}" serve` : 'npx @cogniboom/canvas serve';
-const httpCommand = isRepoCheckout ? `${localCliCommand} http` : 'npx @cogniboom/canvas http';
-const doctorCommand = isRepoCheckout ? `${localCliCommand} doctor` : 'npx @cogniboom/canvas doctor';
+process.env.COGNIBOOM_CANVAS_HELPER_VERSION ??= packageJson.version;
+
+const setupCommand = isRepoCheckout ? `${localCliCommand} setup` : 'npx --yes @cogniboom/canvas@latest setup';
+const serveCommand = isRepoCheckout ? `node "${localCliPath}" serve` : 'npx --yes @cogniboom/canvas@latest serve';
+const httpCommand = isRepoCheckout ? `${localCliCommand} http` : 'npx --yes @cogniboom/canvas@latest http';
+const doctorCommand = isRepoCheckout ? `${localCliCommand} doctor` : 'npx --yes @cogniboom/canvas@latest doctor';
 const configCommand = isRepoCheckout ? 'node' : 'npx';
-const configArgs = isRepoCheckout ? [localCliPath, 'serve'] : ['@cogniboom/canvas', 'serve'];
+const configArgs = isRepoCheckout ? [localCliPath, 'serve'] : ['--yes', '@cogniboom/canvas@latest', 'serve'];
 
 async function importScript(relativePath) {
   const packageScript = path.join(packageRoot, 'server', path.basename(relativePath));
@@ -129,7 +132,7 @@ async function doctor() {
   console.log(`Cogniboom Canvas MCP doctor
 Node: ${node}
 npm: ${npm.status === 0 ? npm.stdout.trim() : 'missing'}
-Package: 0.1.0
+Package: ${packageJson.version}
 Port ${port}: ${portAvailable ? 'available' : 'in use'}
 App health: ${health.ok ? 'healthy' : 'not reachable'}
 HTTP MCP: ${mcp.ok ? 'reachable' : 'not reachable'}
@@ -169,7 +172,7 @@ async function main() {
   }
 
   if (command === 'version') {
-    console.log(`helper: 0.1.0
+    console.log(`helper: ${packageJson.version}
 app: 0.1.0
 mcp protocol: 2024-11-05
 http: ${mcpHttpUrl}`);
