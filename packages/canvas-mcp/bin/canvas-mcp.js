@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import https from 'node:https';
 import http from 'node:http';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -22,12 +24,8 @@ const localCliCommand = `node "${localCliPath}"`;
 const isRepoCheckout = fsExists(path.join(repoRoot, 'scripts', 'canvas-mcp-server.mjs'));
 process.env.COGNIBOOM_CANVAS_HELPER_VERSION ??= packageJson.version;
 
-const setupCommand = isRepoCheckout ? `${localCliCommand} setup` : 'npx --yes @cogniboom/canvas@latest setup';
-const serveCommand = isRepoCheckout ? `node "${localCliPath}" serve` : 'npx --yes @cogniboom/canvas@latest serve';
-const httpCommand = isRepoCheckout ? `${localCliCommand} http` : 'npx --yes @cogniboom/canvas@latest http';
-const doctorCommand = isRepoCheckout ? `${localCliCommand} doctor` : 'npx --yes @cogniboom/canvas@latest doctor';
-const configCommand = isRepoCheckout ? 'node' : 'npx';
-const configArgs = isRepoCheckout ? [localCliPath, 'serve'] : ['--yes', '@cogniboom/canvas@latest', 'serve'];
+const httpCommand = isRepoCheckout ? `${localCliCommand} http` : 'canvas http';
+const doctorCommand = isRepoCheckout ? `${localCliCommand} doctor` : 'canvas doctor';
 
 async function importScript(relativePath) {
   const packageScript = path.join(packageRoot, 'server', path.basename(relativePath));
@@ -43,52 +41,75 @@ function fsExists(filePath) {
   }
 }
 
-function printSetup() {
-  console.log(`Cogniboom Canvas MCP setup
+function getDataDir() {
+  if (process.env.COGNIBOOM_CANVAS_DATA_DIR) return path.resolve(process.env.COGNIBOOM_CANVAS_DATA_DIR);
+  if (process.platform === 'win32') return path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'CogniboomCanvas');
+  if (process.platform === 'darwin') return path.join(process.env.HOME ?? os.homedir(), 'Library', 'Application Support', 'CogniboomCanvas');
+  return path.join(process.env.XDG_DATA_HOME ?? path.join(process.env.HOME ?? os.homedir(), '.local', 'share'), 'cogniboom-canvas');
+}
 
-Why the helper is local:
-  Browser-hosted Canvas cannot expose stdio tools or bind local ports. This helper serves Canvas on ${appUrl} and exposes MCP at ${mcpHttpUrl}.
-
-Setup command:
-  ${setupCommand}
-
-Claude Code:
-  claude mcp add cogniboom-canvas -- ${serveCommand}
-
-Claude Desktop / Cursor JSON:
-  {
-    "mcpServers": {
-      "cogniboom-canvas": {
-        "command": ${JSON.stringify(configCommand)},
-        "args": ${JSON.stringify(configArgs)}
+function fetchLatestVersion() {
+  return new Promise((resolve) => {
+    const request = https.get(
+      'https://registry.npmjs.org/@cogniboom%2Fcanvas/latest',
+      { headers: { accept: 'application/json' } },
+      (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => { body += chunk; });
+        response.on('end', () => {
+          try { resolve(JSON.parse(body).version ?? null); } catch { resolve(null); }
+        });
       }
-    }
+    );
+    request.on('error', () => resolve(null));
+    request.setTimeout(5000, () => { request.destroy(); resolve(null); });
+  });
+}
+
+function spawnNpmInstall(version) {
+  return new Promise((resolve) => {
+    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const child = spawn(npm, ['install', '-g', `@cogniboom/canvas@${version}`], { stdio: 'inherit' });
+    child.on('close', (code) => resolve(code === 0));
+    child.on('error', () => resolve(false));
+  });
+}
+
+async function checkAndAutoUpdate() {
+  const checkFile = path.join(getDataDir(), 'last-update-check');
+  const CHECK_INTERVAL = 24 * 60 * 60 * 1000;
+
+  try {
+    if (Date.now() - fs.statSync(checkFile).mtimeMs < CHECK_INTERVAL) return;
+  } catch { /* no file yet, proceed */ }
+
+  try {
+    fs.mkdirSync(path.dirname(checkFile), { recursive: true });
+    fs.writeFileSync(checkFile, '');
+  } catch { return; }
+
+  const latest = await fetchLatestVersion();
+  if (!latest || latest === packageJson.version) return;
+
+  console.error(`[canvas] Update available: ${packageJson.version} → ${latest}. Installing...`);
+  const ok = await spawnNpmInstall(latest);
+  if (ok) {
+    console.error(`[canvas] Updated to ${latest}. Restart your agent client to use the new version.`);
+  } else {
+    console.error(`[canvas] Auto-update failed. Run: npm install -g @cogniboom/canvas@latest`);
   }
+}
 
-Codex TOML:
-  [mcp_servers.cogniboom_canvas]
-  command = ${JSON.stringify(configCommand)}
-  args = ${JSON.stringify(configArgs)}
-  startup_timeout_sec = 20
-  tool_timeout_sec = 60
+const setupPageUrl = 'https://cogniboom.com/cogniboom-canvas/setup.html';
 
-HTTP clients:
-  Run: ${httpCommand}
-  URL: ${mcpHttpUrl}
-
-Verification prompt:
-  Create a red rectangle in Cogniboom Canvas, then take a screenshot and tell me what you see.
-
-Troubleshooting:
-  1. Restart or reload your agent client.
-  2. Run: ${doctorCommand}
-  3. Open: ${appUrl}/api/health
-
-Security:
-  The server binds only to 127.0.0.1 by default and does not expose arbitrary filesystem tools.
-
-Update:
-  npx @cogniboom/canvas@latest setup`);
+function openSetupPage() {
+  console.log(`Cogniboom Canvas setup guide: ${setupPageUrl}`);
+  if (process.env.CANVAS_NO_OPEN === '1' || process.argv.includes('--no-open')) return;
+  const cmd = process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const args = process.platform === 'win32' ? ['/c', 'start', '', setupPageUrl] : [setupPageUrl];
+  const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
+  child.unref();
 }
 
 function checkPort() {
@@ -146,7 +167,8 @@ ${portAvailable ? `Start HTTP mode with: ${httpCommand}` : 'If this is not Canva
 async function main() {
   if (command === 'serve') {
     const { startStdioMcpServer } = await importScript('scripts/canvas-mcp-server.mjs');
-    await startStdioMcpServer({ startApp: true, open: process.env.CANVAS_NO_OPEN !== '1' && !process.argv.includes('--no-open') });
+    checkAndAutoUpdate().catch(() => {});
+    await startStdioMcpServer({ startApp: true, open: false });
     return;
   }
 
@@ -162,7 +184,7 @@ async function main() {
   }
 
   if (command === 'setup') {
-    printSetup();
+    openSetupPage();
     return;
   }
 
@@ -180,7 +202,7 @@ http: ${mcpHttpUrl}`);
   }
 
   if (command === 'update') {
-    console.log('Update with: npx @cogniboom/canvas@latest setup');
+    openSetupPage();
     return;
   }
 

@@ -211,6 +211,13 @@ interface CanvasState {
   markWorking: (ids: string[]) => void;
   finishWorking: (ids?: string[]) => void;
 
+  // LLM change notifications
+  pendingLlmChangeCount: number;
+  addPendingLlmChanges: (n: number) => void;
+  clearPendingLlmChanges: () => void;
+  pendingFocusCenter: { x: number; y: number } | null;
+  setPendingFocusCenter: (c: { x: number; y: number } | null) => void;
+
   // Frame counter for unique labels
   frameCount: number;
   incrementFrameCount: () => number;
@@ -626,6 +633,12 @@ export const useCanvasStore = create<CanvasState>()(persist((set, get) => ({
         ? s.workingObjectIds.filter((id) => !ids.includes(id))
         : [],
     })),
+
+  pendingLlmChangeCount: 0,
+  addPendingLlmChanges: (n) => set((s) => ({ pendingLlmChangeCount: s.pendingLlmChangeCount + n })),
+  clearPendingLlmChanges: () => set({ pendingLlmChangeCount: 0 }),
+  pendingFocusCenter: null,
+  setPendingFocusCenter: (c) => set({ pendingFocusCenter: c }),
 
   frameCount: 0,
   incrementFrameCount: () => {

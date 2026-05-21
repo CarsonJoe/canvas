@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -9,7 +10,22 @@ export const localDataDir = process.env.COGNIBOOM_CANVAS_DATA_DIR
   : process.env.COGNIBOOM_CANVAS_PACKAGE_MODE === '1'
     ? defaultUserDataDir()
     : path.join(repoRoot, '.canvas-local');
-export const documentPath = path.join(localDataDir, 'current.canvas.json');
+
+function detectGitRoot() {
+  if (!process.env.COGNIBOOM_CANVAS_PACKAGE_MODE) return null;
+  if (process.env.COGNIBOOM_CANVAS_DATA_DIR) return null;
+  try {
+    const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 3000 });
+    return result.status === 0 ? result.stdout.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+const gitRoot = detectGitRoot();
+export const documentPath = gitRoot
+  ? path.join(gitRoot, 'whiteboard.canvas.json')
+  : path.join(localDataDir, 'current.canvas.json');
 export const workingPath = path.join(localDataDir, 'working.json');
 export const screenshotRequestPath = path.join(localDataDir, 'screenshot-request.json');
 export const screenshotResponsePath = path.join(localDataDir, 'screenshot-response.json');
@@ -310,6 +326,63 @@ export async function applyPatches(patches) {
   }
 
   return writeDocument({ ...document, objects, selectedIds, viewport, updatedAt: now() });
+}
+
+export const changesPath = path.join(localDataDir, 'changes.ndjson');
+
+let _nextChangeSeq = null;
+
+async function nextChangeSeq() {
+  if (_nextChangeSeq !== null) return ++_nextChangeSeq;
+  try {
+    const text = await fs.readFile(changesPath, 'utf8');
+    const lines = text.trim().split('\n').filter(Boolean);
+    const last = lines.length ? JSON.parse(lines[lines.length - 1]) : null;
+    _nextChangeSeq = typeof last?.seq === 'number' ? last.seq : 0;
+  } catch {
+    _nextChangeSeq = 0;
+  }
+  return ++_nextChangeSeq;
+}
+
+export async function appendChange({ author, op, objectIds = [], focusId = null }) {
+  let focusCenter = null;
+  if (focusId) {
+    try {
+      const doc = await readDocument();
+      const obj = doc.objects.find((o) => o.id === focusId);
+      const b = objectBounds(obj);
+      if (b) focusCenter = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    } catch { /* ignore */ }
+  }
+  const seq = await nextChangeSeq();
+  const entry = JSON.stringify({ seq, ts: now(), author, op, objectIds, focusId, focusCenter });
+  await fs.mkdir(localDataDir, { recursive: true });
+  await fs.appendFile(changesPath, entry + '\n', 'utf8');
+  return seq;
+}
+
+export async function readChangesSince(seq) {
+  try {
+    const text = await fs.readFile(changesPath, 'utf8');
+    return text.trim().split('\n').filter(Boolean)
+      .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+      .filter((e) => e && typeof e.seq === 'number' && e.seq > seq);
+  } catch {
+    return [];
+  }
+}
+
+export async function latestChangeSeq() {
+  try {
+    const text = await fs.readFile(changesPath, 'utf8');
+    const lines = text.trim().split('\n').filter(Boolean);
+    if (!lines.length) return 0;
+    const last = JSON.parse(lines[lines.length - 1]);
+    return typeof last?.seq === 'number' ? last.seq : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function summarizeDocument(document) {

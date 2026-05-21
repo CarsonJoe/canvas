@@ -2287,6 +2287,17 @@ export default function InfiniteCanvas() {
     : tool === 'text' ? 'text'
     : 'default';
 
+  // Pan to LLM focus target when the bridge signals a new change center.
+  const pendingFocusCenter = useCanvasStore((s) => s.pendingFocusCenter);
+  const setPendingFocusCenter = useCanvasStore((s) => s.setPendingFocusCenter);
+  useEffect(() => {
+    if (!pendingFocusCenter) return;
+    const newX = size.w / 2 - pendingFocusCenter.x * stageScale;
+    const newY = size.h / 2 - pendingFocusCenter.y * stageScale;
+    setStageTransform(newX, newY, stageScale);
+    setPendingFocusCenter(null);
+  }, [pendingFocusCenter, setPendingFocusCenter, size, stageScale, setStageTransform]);
+
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div

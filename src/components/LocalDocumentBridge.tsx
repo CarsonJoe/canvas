@@ -2,6 +2,16 @@ import { useEffect, useRef } from 'react';
 import { useCanvasStore } from '../store/useCanvasStore';
 import { CanvasDocument } from '../types/canvas';
 
+interface ChangeEntry {
+  seq: number;
+  ts: string;
+  author: 'llm' | 'human';
+  op: string;
+  objectIds: string[];
+  focusId: string | null;
+  focusCenter: { x: number; y: number } | null;
+}
+
 const POLL_MS = 900;
 
 function isLocalServer(): boolean {
@@ -21,6 +31,16 @@ async function postDocument(document: CanvasDocument): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(document),
   });
+}
+
+async function fetchChanges(since: number): Promise<{ changes: ChangeEntry[]; latestSeq: number } | null> {
+  try {
+    const response = await fetch(`/api/changes?since=${since}`, { cache: 'no-store' });
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
 }
 
 async function fetchWorkingIds(): Promise<string[]> {
@@ -60,10 +80,13 @@ export default function LocalDocumentBridge() {
   const importDocument = useCanvasStore((state) => state.importDocument);
   const markWorking = useCanvasStore((state) => state.markWorking);
   const finishWorking = useCanvasStore((state) => state.finishWorking);
+  const addPendingLlmChanges = useCanvasStore((state) => state.addPendingLlmChanges);
+  const setPendingFocusCenter = useCanvasStore((state) => state.setPendingFocusCenter);
   const lastRemoteUpdatedAtRef = useRef<string | null>(null);
   const lastPostedUpdatedAtRef = useRef<string | null>(null);
   const lastScreenshotRequestIdRef = useRef<string | null>(null);
   const applyingRemoteRef = useRef(false);
+  const lastSeenSeqRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!isLocalServer()) return;
@@ -164,6 +187,33 @@ export default function LocalDocumentBridge() {
     }, POLL_MS);
     return () => window.clearInterval(interval);
   }, [importDocument]);
+
+  // Baseline: record current seq on mount so we only notify about future LLM changes.
+  useEffect(() => {
+    if (!isLocalServer()) return;
+    fetchChanges(0).then((result) => {
+      if (result) lastSeenSeqRef.current = result.latestSeq;
+    }).catch(() => {});
+  }, []);
+
+  // Poll for new LLM changes and drive toast + focus.
+  useEffect(() => {
+    if (!isLocalServer()) return;
+    const interval = window.setInterval(() => {
+      if (lastSeenSeqRef.current === null) return;
+      fetchChanges(lastSeenSeqRef.current).then((result) => {
+        if (!result || result.changes.length === 0) return;
+        const llmChanges = result.changes.filter((c) => c.author === 'llm');
+        if (llmChanges.length > 0) {
+          addPendingLlmChanges(llmChanges.length);
+          const withFocus = [...llmChanges].reverse().find((c) => c.focusCenter !== null);
+          if (withFocus?.focusCenter) setPendingFocusCenter(withFocus.focusCenter);
+        }
+        lastSeenSeqRef.current = result.latestSeq;
+      }).catch(() => {});
+    }, POLL_MS);
+    return () => window.clearInterval(interval);
+  }, [addPendingLlmChanges, setPendingFocusCenter]);
 
   return null;
 }

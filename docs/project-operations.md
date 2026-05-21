@@ -14,113 +14,68 @@ The project has two public surfaces:
 2. Local MCP helper package
    - Published to npm as `@cogniboom/canvas`.
    - Exposes the `canvas` binary.
-   - Serves the local browser app and MCP endpoint.
+   - Installed globally: `npm install -g @cogniboom/canvas`.
    - Supports stdio MCP with `canvas serve`.
    - Supports HTTP MCP with `canvas http`.
-
-## Repository Hygiene Rules
-
-Never commit:
-
-- `.env`
-- `.env.local`
-- `node_modules/`
-- `.canvas-local/`
-- npm tarballs such as `*.tgz`
-- local logs
-- local screenshots or generated test output
-- API keys or copied secret-bearing config files
-
-Before the first public GitHub push, the safest path is to create a fresh git history.
-
-Recommended cleanup:
-
-```powershell
-cd C:\Users\Carson\Desktop\Projects\canvas
-Remove-Item -Recurse -Force .git
-Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force .canvas-local -ErrorAction SilentlyContinue
-Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
-Remove-Item -Force *.tgz -ErrorAction SilentlyContinue
-```
-
-Then inspect ignored and untracked files:
-
-```powershell
-git init
-git status --short
-git check-ignore -v .env node_modules .canvas-local dist
-```
-
-Commit only after confirming secrets and generated folders are not staged.
-
-## Required `.gitignore`
-
-Keep at least:
-
-```gitignore
-.env
-.env.*
-!.env.example
-node_modules/
-dist/
-.canvas-local/
-canvas-local*.log
-*.tgz
-npm-debug.log*
-vite-dev*.log
-```
-
-If a future feature creates local data, screenshots, or generated output, add it to `.gitignore` before running broad `git add` commands.
+   - Auto-updates on `canvas serve` launch (checks npm once per 24 h).
 
 ## Secret Handling
 
 The hosted app must support bring-your-own-key for image generation. Do not embed an OpenAI key in the production build.
 
-Expected model:
+## Data Storage
 
-- User enters their own API key in the browser.
-- Key is stored only in browser storage or session memory.
-- Key is never committed, logged, sent to Cogniboom servers, or written into exported canvas documents.
-- `.env.example` may document optional local development variables with placeholder values only.
+Canvas data is stored per-user in the OS app-data directory, not in the repo:
 
-Before every public release:
+- **Linux**: `~/.local/share/cogniboom-canvas/`
+- **macOS**: `~/Library/Application Support/CogniboomCanvas/`
+- **Windows**: `%LOCALAPPDATA%\CogniboomCanvas\`
 
-```powershell
-rg "sk-|OPENAI_API_KEY|apiKey|Authorization|Bearer" . --glob "!node_modules/**" --glob "!dist/**" --glob "!packages/canvas-mcp/dist/**"
+This means canvas data never appears in git, regardless of which repo the agent is running in. To scope data to a specific project today, set `COGNIBOOM_CANVAS_DATA_DIR` in the MCP server environment:
+
+```json
+{
+  "mcpServers": {
+    "cogniboom-canvas": {
+      "command": "canvas",
+      "args": ["serve"],
+      "env": { "COGNIBOOM_CANVAS_DATA_DIR": "/path/to/project/.canvas" }
+    }
+  }
+}
 ```
 
-Manually inspect any hits.
+Add `.canvas/` to that project's `.gitignore` if you go this route.
 
 ## Local Development
 
 Install dependencies:
 
-```powershell
+```sh
 npm install
 ```
 
 Run the web app:
 
-```powershell
+```sh
 npm run dev
 ```
 
 Build the web app:
 
-```powershell
+```sh
 npm run build
 ```
 
 Build the MCP package assets:
 
-```powershell
+```sh
 npm run build:mcp-package
 ```
 
 Dry-run the npm package:
 
-```powershell
+```sh
 npm run pack:mcp-package
 ```
 
@@ -150,24 +105,12 @@ canvas
 2. Run build and package dry-run.
 3. Verify tarball contents.
 4. Publish to npm.
-5. Verify from a clean directory.
+5. Verify from a clean environment.
 6. Update docs or hosted setup page if commands changed.
 
 ### Version Bump
 
-Use semantic versioning:
-
-- Patch: bug fix, doc fix, setup output fix.
-- Minor: new backward-compatible commands or tools.
-- Major: breaking CLI, MCP, document format, or setup changes.
-
-Edit:
-
-```text
-packages/canvas-mcp/package.json
-```
-
-Example:
+Edit `packages/canvas-mcp/package.json`:
 
 ```json
 "version": "0.1.1"
@@ -175,16 +118,11 @@ Example:
 
 ### Build And Dry Run
 
-```powershell
-cd C:\Users\Carson\Desktop\Projects\canvas
+```sh
 npm run pack:mcp-package
 ```
 
-Expected:
-
-- Package name is `@cogniboom/canvas`.
-- Tarball name is `cogniboom-canvas-VERSION.tgz`.
-- Tarball contents include:
+Expected tarball contents:
 
 ```text
 README.md
@@ -196,23 +134,11 @@ server/canvas-local-core.mjs
 server/canvas-mcp-server.mjs
 ```
 
-- Tarball should not include:
-
-```text
-node_modules/
-.env
-.canvas-local/
-src/
-docs/
-scripts/
-*.log
-```
-
 ### Publish
 
-```powershell
-cd C:\Users\Carson\Desktop\Projects\canvas\packages\canvas-mcp
-npm publish --access public --otp=YOUR_6_DIGIT_CODE
+```sh
+cd packages/canvas-mcp
+npm publish --access public
 ```
 
 If npm prompts for browser authentication, complete it and rerun if needed.
@@ -221,28 +147,25 @@ If the version already exists, bump the version and publish again. npm versions 
 
 ### Verify npm
 
-Use a clean directory:
+Install globally in a clean shell to confirm the published package works:
 
-```powershell
-cd C:\tmp
-npm view @cogniboom/canvas version
-npx --yes @cogniboom/canvas@latest version
-npx --yes @cogniboom/canvas@latest setup
+```sh
+npm install -g @cogniboom/canvas@latest
+canvas version
+canvas setup --no-open
 ```
 
 HTTP mode smoke test:
 
-```powershell
-$env:CANVAS_PORT='3873'
-$env:CANVAS_NO_OPEN='1'
-npx --yes @cogniboom/canvas@latest http
+```sh
+CANVAS_PORT=3873 CANVAS_NO_OPEN=1 canvas http
 ```
 
 In another terminal:
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:3873/api/health
-Invoke-RestMethod http://127.0.0.1:3873/mcp
+```sh
+curl http://127.0.0.1:3873/api/health
+curl http://127.0.0.1:3873/mcp
 ```
 
 Expected:
@@ -250,194 +173,15 @@ Expected:
 - `/api/health` returns `ok: true`.
 - `/mcp` returns `ok: true`.
 
-### Deprecating Old Package Names
+Uninstall after testing:
 
-If `@cogniboom/canvas-mcp` remains published, deprecate it after `@cogniboom/canvas` works:
-
-```powershell
-npm deprecate @cogniboom/canvas-mcp@"*" "Renamed to @cogniboom/canvas"
-```
-
-## GitHub Repository Setup
-
-After deleting old history and confirming ignored files:
-
-```powershell
-git init
-git add .
-git status --short
-git commit -m "Initial public release"
-git branch -M main
-git remote add origin https://github.com/Cogniboom/canvas.git
-git push -u origin main
-```
-
-Use the actual GitHub owner/repo URL.
-
-Before pushing, run:
-
-```powershell
-git status --short
-rg "sk-|OPENAI_API_KEY|Bearer|Authorization" . --glob "!node_modules/**" --glob "!dist/**" --glob "!packages/canvas-mcp/dist/**"
+```sh
+npm uninstall -g @cogniboom/canvas
 ```
 
 ## GitHub Pages Release
 
-The hosted app should be built from the repo and deployed to GitHub Pages.
-
-Recommended approach:
-
-- Use GitHub Actions.
-- Build with `npm ci` and `npm run build`.
-- Upload `dist/` as the Pages artifact.
-- Deploy from the `main` branch.
-
-Required repo settings:
-
-1. GitHub repo Settings.
-2. Pages.
-3. Source: GitHub Actions.
-
-Add a workflow such as:
-
-```yaml
-name: Deploy Pages
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
-```
-
-This repo has `.github/workflows/deploy-pages.yml` configured for a GitHub Pages repo path:
-
-```text
-https://OWNER.github.io/canvas/
-```
-
-The workflow sets:
-
-```text
-VITE_BASE_PATH=/canvas/
-```
-
-Local and npm package builds keep the default base path `/`.
-
-For a custom domain like `cogniboom.com/canvas`, keep `/canvas/`. For a root custom domain, change the workflow env to:
-
-```text
-VITE_BASE_PATH=/
-```
-
-## Hosted Site Verification
-
-After Pages deploys, test:
-
-1. Open the hosted Canvas URL.
-2. Confirm the app loads without console 404s.
-3. Open the top-right menu.
-4. Click `Connect MCP`.
-5. Confirm setup page loads.
-6. Confirm setup page uses:
-
-```powershell
-npx @cogniboom/canvas setup
-```
-
-7. Confirm setup page explains:
-
-- why MCP needs a local helper
-- local app URL
-- MCP HTTP URL
-- client setup snippets
-- verification prompt
-- troubleshooting
-- security model
-
-## Another Machine Verification
-
-Use a machine that has not cloned this repo.
-
-Prerequisites:
-
-- Node 18 or newer.
-- npm.
-- A browser.
-- An MCP-capable client for manual client tests.
-
-Test npm install path:
-
-```powershell
-cd C:\tmp
-npx --yes @cogniboom/canvas@latest setup
-npx --yes @cogniboom/canvas@latest doctor
-```
-
-Test HTTP helper:
-
-```powershell
-npx --yes @cogniboom/canvas@latest http
-```
-
-Open:
-
-```text
-http://127.0.0.1:3762
-```
-
-Expected:
-
-- Browser app opens.
-- Local app loads from package assets.
-- No repo clone is required.
-
-Test MCP verification prompt in an agent:
-
-```text
-Create a red rectangle in Cogniboom Canvas, then take a screenshot and tell me what you see.
-```
-
-Expected:
-
-- Agent lists Canvas tools.
-- Agent creates an object.
-- Browser shows the object.
-- Screenshot succeeds when the local browser tab is open.
+Auto deploys from the `master` branch.
 
 ## Release Order
 
@@ -449,13 +193,9 @@ For a normal release:
 4. Publish npm package if helper changed.
 5. Push to GitHub.
 6. Wait for Pages deploy.
-7. Verify hosted site.
-8. Verify `npx @cogniboom/canvas@latest` from a clean directory.
+7. Verify hosted site and setup page at `https://cogniboom.com/cogniboom-canvas/setup.html`.
+8. Install globally and verify: `npm install -g @cogniboom/canvas@latest && canvas version`.
 9. Test on another machine before announcing.
-
-If only hosted app changed, npm publish may not be needed unless the local helper package also needs updated bundled assets.
-
-If setup page changed, rebuild and republish npm too, because the package ships `dist/`.
 
 ## Rollback
 
@@ -470,21 +210,6 @@ npm:
 - Publish a fixed patch version.
 - Deprecate a bad version if needed:
 
-```powershell
+```sh
 npm deprecate @cogniboom/canvas@VERSION "Use VERSION+1"
 ```
-
-## Current Pre-Public Checklist
-
-Before the first clean GitHub push:
-
-- Delete old `.git`.
-- Confirm `.gitignore` covers secrets and generated folders.
-- Add bring-your-own-key image generation.
-- Confirm no OpenAI key is bundled into the app.
-- Add GitHub Pages workflow.
-- Run full local build.
-- Run npm package dry-run.
-- Publish `@cogniboom/canvas`.
-- Verify from `C:\tmp`.
-- Verify on another machine.

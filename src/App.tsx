@@ -2,6 +2,7 @@ import InfiniteCanvas from './components/InfiniteCanvas';
 import LeftToolbar from './components/LeftToolbar';
 import BottomBar from './components/BottomBar';
 import LocalDocumentBridge from './components/LocalDocumentBridge';
+import LlmChangesToast from './components/LlmChangesToast';
 import SceneMenu from './components/SceneMenu';
 
 export default function App() {
@@ -13,6 +14,7 @@ export default function App() {
         <InfiniteCanvas />
         <SceneMenu />
         <BottomBar />
+        <LlmChangesToast />
       </div>
     </div>
   );

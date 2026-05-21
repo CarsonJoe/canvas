@@ -1,8 +1,10 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import {
   applyPatches,
+  appendChange,
   appUrl,
   appVersion,
   helperVersion,
@@ -154,6 +156,10 @@ export const tools = [
     properties: { projectId: { type: 'string' }, previewUrl: { type: 'string' } },
     required: ['projectId'],
   }),
+  toolSchema('canvas.launch', 'Open the Canvas app in the default browser so the user can view your work. Call this when you want the user to see the canvas. Pass focusObjectId to center the view on a specific object.', {
+    type: 'object',
+    properties: { focusObjectId: { type: 'string' } },
+  }),
   toolSchema('canvas.mark_working', 'Mark objects as being edited by the agent.', {
     type: 'object',
     properties: { ids: { type: 'array', items: { type: 'string' } } },
@@ -259,6 +265,19 @@ export async function callTool(name, args = {}, context = {}) {
       }
     case 'canvas.get_linked_projects':
       return content(document.links ?? []);
+    case 'canvas.launch': {
+      const focusId = args.focusObjectId ?? null;
+      if (process.env.CANVAS_NO_OPEN !== '1') {
+        const cmd = process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+        const cmdArgs = process.platform === 'win32' ? ['/c', 'start', '', appUrl] : [appUrl];
+        const child = spawn(cmd, cmdArgs, { detached: true, stdio: 'ignore' });
+        child.unref();
+      }
+      if (focusId) {
+        await appendChange({ author: 'llm', op: 'launch', objectIds: [focusId], focusId }).catch(() => {});
+      }
+      return content({ app_url: appUrl, opened: process.env.CANVAS_NO_OPEN !== '1', focusObjectId: focusId });
+    }
     case 'canvas.create_frame': {
       const frame = {
         id: args.id ?? makeId('frame'),
@@ -276,26 +295,30 @@ export async function callTool(name, args = {}, context = {}) {
         priorBounds: null,
       };
       await applyPatches({ op: 'create', objects: [frame], select: true });
-      return content(frame);
+      await appendChange({ author: 'llm', op: 'create_frame', objectIds: [frame.id], focusId: frame.id }).catch(() => {});
+      return content({ ...frame, view_url: appUrl });
     }
-    case 'canvas.create_objects':
-      {
-        const objects = (args.objects ?? []).map(normalizeCanvasObject).filter(Boolean);
-        await applyPatches({ op: 'create', objects, select: args.select ?? true });
-        return content({ createdIds: objects.map((object) => object.id), objects });
-      }
+    case 'canvas.create_objects': {
+      const objects = (args.objects ?? []).map(normalizeCanvasObject).filter(Boolean);
+      await applyPatches({ op: 'create', objects, select: args.select ?? true });
+      await appendChange({ author: 'llm', op: 'create_objects', objectIds: objects.map((o) => o.id), focusId: objects[0]?.id ?? null }).catch(() => {});
+      return content({ createdIds: objects.map((o) => o.id), objects, view_url: appUrl });
+    }
     case 'canvas.update_objects':
       await applyPatches(args.updates.map((item) => ({ op: 'update', id: item.id, changes: item.changes })));
-      return content({ updatedIds: args.updates.map((item) => item.id) });
+      await appendChange({ author: 'llm', op: 'update_objects', objectIds: args.updates.map((item) => item.id), focusId: args.updates[0]?.id ?? null }).catch(() => {});
+      return content({ updatedIds: args.updates.map((item) => item.id), view_url: appUrl });
     case 'canvas.set_text_content':
       await applyPatches({ op: 'update', id: args.objectId, changes: { text: args.text } });
-      return content({ id: args.objectId, text: args.text });
+      await appendChange({ author: 'llm', op: 'set_text', objectIds: [args.objectId], focusId: args.objectId }).catch(() => {});
+      return content({ id: args.objectId, text: args.text, view_url: appUrl });
     case 'canvas.move_objects': {
       const patches = document.objects
         .filter((object) => args.ids.includes(object.id))
         .map((object) => ({ op: 'update', id: object.id, changes: shiftObject(object, args.dx, args.dy) }));
       await applyPatches(patches);
-      return content({ movedIds: patches.map((patch) => patch.id), dx: args.dx, dy: args.dy });
+      await appendChange({ author: 'llm', op: 'move_objects', objectIds: args.ids, focusId: args.ids[0] ?? null }).catch(() => {});
+      return content({ movedIds: patches.map((patch) => patch.id), dx: args.dx, dy: args.dy, view_url: appUrl });
     }
     case 'canvas.duplicate_objects': {
       const offset = args.offset ?? { x: 24, y: 24 };
@@ -303,17 +326,21 @@ export async function callTool(name, args = {}, context = {}) {
         .filter((object) => args.ids.includes(object.id))
         .map((object) => shiftObject(object, offset.x ?? 24, offset.y ?? 24, makeId(object.type)));
       await applyPatches({ op: 'create', objects: clones, select: true });
-      return content({ createdIds: clones.map((object) => object.id) });
+      await appendChange({ author: 'llm', op: 'duplicate_objects', objectIds: clones.map((o) => o.id), focusId: clones[0]?.id ?? null }).catch(() => {});
+      return content({ createdIds: clones.map((object) => object.id), view_url: appUrl });
     }
     case 'canvas.delete_objects':
       await applyPatches({ op: 'delete', ids: args.ids });
-      return content({ deletedIds: args.ids });
+      await appendChange({ author: 'llm', op: 'delete_objects', objectIds: args.ids, focusId: null }).catch(() => {});
+      return content({ deletedIds: args.ids, view_url: appUrl });
     case 'canvas.rename_objects':
       await applyPatches(args.items.map((item) => ({ op: 'update', id: item.id, changes: { label: item.name } })));
-      return content({ renamedIds: args.items.map((item) => item.id) });
+      await appendChange({ author: 'llm', op: 'rename_objects', objectIds: args.items.map((i) => i.id), focusId: args.items[0]?.id ?? null }).catch(() => {});
+      return content({ renamedIds: args.items.map((item) => item.id), view_url: appUrl });
     case 'canvas.apply_patch':
       await applyPatches(args.patch);
-      return content({ ok: true });
+      await appendChange({ author: 'llm', op: 'apply_patch', objectIds: [], focusId: null }).catch(() => {});
+      return content({ ok: true, view_url: appUrl });
     case 'canvas.create_project_preview': {
       const link = document.links?.find((item) => item.id === args.projectId);
       const bounds = args.bounds ?? { x: 0, y: 0, width: 1024, height: 768 };
@@ -334,7 +361,8 @@ export async function callTool(name, args = {}, context = {}) {
       };
       const links = (document.links ?? []).map((item) => item.id === args.projectId ? { ...item, previewUrl: args.url } : item);
       await writeDocument({ ...document, objects: [...document.objects, frame], selectedIds: [frame.id], links, updatedAt: now() });
-      return content(frame);
+      await appendChange({ author: 'llm', op: 'create_frame', objectIds: [frame.id], focusId: frame.id }).catch(() => {});
+      return content({ ...frame, view_url: appUrl });
     }
     case 'canvas.link_project': {
       const link = {
