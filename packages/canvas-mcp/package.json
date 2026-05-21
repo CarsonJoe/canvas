@@ -1,0 +1,39 @@
+{
+  "name": "@cogniboom/canvas",
+  "version": "0.1.1",
+  "description": "Local Cogniboom Canvas app server and MCP helper.",
+  "type": "module",
+  "bin": {
+    "canvas": "bin/canvas-mcp.js"
+  },
+  "exports": {
+    "./server/app-server": "./server/canvas-app-server.mjs",
+    "./server/document-store": "./server/canvas-local-core.mjs",
+    "./server/mcp": "./server/canvas-mcp-server.mjs",
+    "./server/tools": "./server/canvas-mcp-server.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin/",
+    "server/",
+    "dist/",
+    "package.json",
+    "README.md"
+  ],
+  "scripts": {
+    "pack:dry": "npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "canvas",
+    "mcp",
+    "model-context-protocol",
+    "cogniboom"
+  ],
+  "license": "UNLICENSED"
+}

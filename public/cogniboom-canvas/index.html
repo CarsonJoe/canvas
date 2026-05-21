@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cogniboom Canvas</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #071014;
+        --paper: #f7f8f3;
+        --muted: #a9b7ad;
+        --line: #263a39;
+        --gold: #f5c84b;
+        --teal: #38d0bd;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--ink);
+        color: var(--paper);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      .top-rule {
+        height: 8px;
+        background: var(--gold);
+      }
+
+      .shell {
+        min-height: calc(100vh - 8px);
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        height: 112px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 clamp(32px, 6vw, 88px);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-size: 25px;
+        font-weight: 650;
+        letter-spacing: 0;
+      }
+
+      .brand-mark {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        background: var(--gold);
+        box-shadow: 0 0 0 8px rgba(245, 200, 75, 0.08);
+      }
+
+      nav {
+        display: flex;
+        align-items: center;
+        gap: 34px;
+        color: var(--muted);
+        font-size: 17px;
+      }
+
+      .nav-cta {
+        color: var(--ink);
+        background: var(--paper);
+        border-radius: 8px;
+        padding: 15px 22px;
+        font-weight: 700;
+      }
+
+      main {
+        flex: 1;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.02fr) minmax(420px, 0.78fr);
+        gap: clamp(48px, 6vw, 96px);
+        align-items: center;
+        padding: 70px clamp(32px, 6vw, 88px) 76px;
+      }
+
+      .eyebrow {
+        color: var(--gold);
+        font-weight: 800;
+        font-size: 14px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        margin-bottom: 34px;
+      }
+
+      h1 {
+        margin: 0;
+        max-width: 820px;
+        font-size: clamp(56px, 6.4vw, 92px);
+        line-height: 0.98;
+        letter-spacing: 0;
+      }
+
+      h1 span {
+        color: #d8e0d2;
+      }
+
+      .lede {
+        max-width: 790px;
+        margin: 34px 0 0;
+        color: #b8c6ba;
+        font-size: clamp(21px, 2vw, 28px);
+        line-height: 1.38;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+        margin-top: 44px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 62px;
+        border-radius: 8px;
+        padding: 0 28px;
+        font-weight: 750;
+        font-size: 19px;
+        border: 1px solid transparent;
+      }
+
+      .button.primary {
+        background: var(--gold);
+        color: var(--ink);
+      }
+
+      .button.secondary {
+        border-color: #64736b;
+      }
+
+      .mock {
+        border: 1px solid #2f4545;
+        background: #111c1f;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 30px 90px rgba(0, 0, 0, 0.32);
+      }
+
+      .mock-bar {
+        height: 58px;
+        display: flex;
+        align-items: center;
+        padding: 0 28px;
+        background: #18282a;
+        color: #d8e0d2;
+        font-size: 16px;
+      }
+
+      .mock-body {
+        position: relative;
+        min-height: 430px;
+        padding: 54px;
+      }
+
+      .mock-frame {
+        width: min(48vw, 270px);
+        height: 188px;
+        border-radius: 8px;
+        border: 3px solid var(--gold);
+        background: var(--paper);
+        color: var(--ink);
+        display: grid;
+        place-items: center;
+        font-size: 25px;
+        font-weight: 750;
+      }
+
+      .note {
+        position: absolute;
+        right: 54px;
+        top: 84px;
+        width: 172px;
+        min-height: 96px;
+        border-radius: 8px;
+        background: var(--gold);
+        color: var(--ink);
+        padding: 22px;
+        font-weight: 750;
+        font-size: 18px;
+        line-height: 1.18;
+      }
+
+      .agent {
+        margin-top: 44px;
+        border: 2px solid var(--teal);
+        border-radius: 8px;
+        color: var(--teal);
+        padding: 16px 20px;
+        font-family: Consolas, "SFMono-Regular", monospace;
+        font-size: 16px;
+      }
+
+      .features {
+        padding: 68px clamp(32px, 6vw, 88px) 86px;
+        border-top: 1px solid rgba(255, 255, 255, 0.07);
+      }
+
+      .features h2 {
+        margin: 0 0 34px;
+        font-size: clamp(34px, 3.5vw, 48px);
+        line-height: 1.08;
+      }
+
+      .feature-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 24px;
+      }
+
+      .feature {
+        min-height: 164px;
+        padding: 28px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #101b1d;
+      }
+
+      .feature h3 {
+        margin: 0 0 18px;
+        font-size: 24px;
+      }
+
+      .feature p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 18px;
+        line-height: 1.42;
+      }
+
+      @media (max-width: 980px) {
+        header {
+          height: auto;
+          gap: 24px;
+          align-items: flex-start;
+          flex-direction: column;
+          padding-top: 28px;
+          padding-bottom: 28px;
+        }
+
+        nav {
+          width: 100%;
+          justify-content: space-between;
+          gap: 16px;
+          flex-wrap: wrap;
+        }
+
+        .hero {
+          grid-template-columns: 1fr;
+          padding-top: 40px;
+        }
+
+        .feature-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="top-rule"></div>
+    <div class="shell">
+      <header>
+        <a class="brand" href="./">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>cogniboom canvas</span>
+        </a>
+        <nav aria-label="Primary">
+          <a href="#product">Product</a>
+          <a href="#workflow">Workflow</a>
+          <a href="./setup.html">Setup</a>
+          <a class="nav-cta" href="./setup.html">Open Canvas</a>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero" id="product">
+          <div>
+            <div class="eyebrow">Local-first visual workspace for agents</div>
+            <h1>Cogniboom Canvas <span>for agent-led product work.</span></h1>
+            <p class="lede">
+              A live canvas where Codex and Claude can read, draw, revise, and respond to your visual annotations while your project stays independent.
+            </p>
+            <div class="actions">
+              <a class="button primary" href="./setup.html">Try local MCP</a>
+              <a class="button secondary" href="#workflow">See workflow</a>
+            </div>
+          </div>
+
+          <div class="mock" aria-label="Canvas product preview">
+            <div class="mock-bar">Canvas document</div>
+            <div class="mock-body">
+              <div class="mock-frame">Landing page</div>
+              <div class="note">Make CTA<br />stronger</div>
+              <div class="agent">agent editing frame_mpeo...</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="features" id="workflow">
+          <h2>Built for the agent-on-canvas loop</h2>
+          <div class="feature-grid">
+            <article class="feature">
+              <h3>Native canvas objects</h3>
+              <p>Frames, text, arrows, strokes, comments, embeds, and patches stay inspectable.</p>
+            </article>
+            <article class="feature">
+              <h3>Local MCP bridge</h3>
+              <p>Agents read screenshots, annotations, document state, and stable object IDs.</p>
+            </article>
+            <article class="feature">
+              <h3>Project independent</h3>
+              <p>Preview repos without making them depend on Canvas or a proprietary runtime.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+  </body>
+</html>

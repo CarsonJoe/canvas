@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+.canvas-local/
+.claude/settings.local.json
+canvas-local*.log
+*.tgz
+npm-debug.log*
+vite-dev*.log
+coverage/
+.DS_Store

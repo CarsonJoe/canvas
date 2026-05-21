@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cogniboom Canvas MCP</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #101414;
+        --paper: #f6f7f4;
+        --panel: #ffffff;
+        --muted: #53605b;
+        --line: #d8ded8;
+        --accent: #0f766e;
+        --accent-soft: #e5f5f1;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--paper);
+        color: var(--ink);
+      }
+
+      header, main { padding: 0 clamp(24px, 6vw, 88px); }
+      header {
+        min-height: 92px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-top: 8px solid var(--accent);
+      }
+
+      a { color: inherit; text-decoration: none; }
+      .brand { font-size: 24px; font-weight: 760; }
+      nav { display: flex; gap: 24px; color: var(--muted); font-size: 15px; }
+
+      .hero {
+        padding: 56px 0 34px;
+        max-width: 980px;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(42px, 5vw, 68px);
+        line-height: 1.04;
+        letter-spacing: 0;
+      }
+      .lede {
+        margin: 24px 0 0;
+        color: var(--muted);
+        font-size: clamp(19px, 2vw, 25px);
+        line-height: 1.44;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+        gap: 24px;
+        align-items: start;
+        padding-bottom: 72px;
+      }
+      .panel, details {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+      .panel { padding: 28px; }
+      h2 { margin: 0 0 16px; font-size: 28px; line-height: 1.15; }
+      h3 { margin: 24px 0 10px; font-size: 19px; }
+      p, li { color: var(--muted); font-size: 16px; line-height: 1.5; }
+      ul { margin: 12px 0 0; padding-left: 20px; }
+      code, pre {
+        font-family: Consolas, "SFMono-Regular", ui-monospace, monospace;
+      }
+      pre {
+        margin: 12px 0 0;
+        padding: 16px;
+        overflow-x: auto;
+        border-radius: 8px;
+        background: var(--ink);
+        color: #8ee8d8;
+        font-size: 14px;
+        line-height: 1.55;
+      }
+      .callout {
+        margin-top: 18px;
+        padding: 16px;
+        border-radius: 8px;
+        background: var(--accent-soft);
+        color: #17423d;
+      }
+      details { margin-top: 12px; }
+      summary {
+        cursor: pointer;
+        padding: 18px 20px;
+        font-weight: 720;
+      }
+      details > div { padding: 0 20px 20px; }
+
+      @media (max-width: 900px) {
+        header { align-items: flex-start; flex-direction: column; gap: 14px; padding-top: 22px; padding-bottom: 22px; }
+        nav { flex-wrap: wrap; }
+        .grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="./">cogniboom canvas</a>
+      <nav aria-label="Primary">
+        <a href="./">Canvas</a>
+        <a href="#clients">Clients</a>
+        <a href="#troubleshooting">Troubleshooting</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>Connect MCP to Cogniboom Canvas.</h1>
+        <p class="lede">The hosted app runs in your browser. MCP needs a small local helper so agent clients can use stdio or a local HTTP endpoint without exposing your canvas to the network.</p>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <h2>Install</h2>
+          <p>Run setup once, then restart your agent client after adding the configuration it prints.</p>
+          <pre>npx @cogniboom/canvas setup</pre>
+
+          <h3>What the helper can access</h3>
+          <ul>
+            <li>The current local Canvas document and selection.</li>
+            <li>Canvas objects, annotations, linked project metadata, and working markers.</li>
+            <li>Screenshots from an open local Canvas browser tab.</li>
+          </ul>
+
+          <h3>Security</h3>
+          <p>The helper binds to <code>127.0.0.1</code>, stores documents in local app data, and does not provide arbitrary filesystem tools.</p>
+        </article>
+
+        <aside class="panel">
+          <h2>Local URLs</h2>
+          <p>Browser app</p>
+          <pre>http://127.0.0.1:3762</pre>
+          <p>MCP HTTP endpoint</p>
+          <pre>http://127.0.0.1:3762/mcp</pre>
+          <div class="callout">Verification prompt: Create a red rectangle in Cogniboom Canvas, then take a screenshot and tell me what you see.</div>
+        </aside>
+      </section>
+
+      <section id="clients" class="grid">
+        <article class="panel">
+          <h2>Client Setup</h2>
+
+          <details open>
+            <summary>Claude Code</summary>
+            <div><pre>claude mcp add cogniboom-canvas -- npx @cogniboom/canvas serve</pre></div>
+          </details>
+
+          <details>
+            <summary>Claude Desktop</summary>
+            <div><pre>{
+  "mcpServers": {
+    "cogniboom-canvas": {
+      "command": "npx",
+      "args": ["@cogniboom/canvas", "serve"]
+    }
+  }
+}</pre></div>
+          </details>
+
+          <details>
+            <summary>Codex</summary>
+            <div><pre>[mcp_servers.cogniboom_canvas]
+command = "npx"
+args = ["@cogniboom/canvas", "serve"]
+startup_timeout_sec = 20
+tool_timeout_sec = 60</pre></div>
+          </details>
+
+          <details>
+            <summary>Cursor</summary>
+            <div><pre>{
+  "mcpServers": {
+    "cogniboom-canvas": {
+      "command": "npx",
+      "args": ["@cogniboom/canvas", "serve"]
+    }
+  }
+}</pre></div>
+          </details>
+
+          <details>
+            <summary>HTTP clients</summary>
+            <div><pre>npx @cogniboom/canvas http
+http://127.0.0.1:3762/mcp</pre></div>
+          </details>
+        </article>
+
+        <aside class="panel" id="troubleshooting">
+          <h2>Troubleshooting</h2>
+          <ul>
+            <li>Restart or reload the agent client after changing MCP config.</li>
+            <li>Run <code>npx @cogniboom/canvas doctor</code>.</li>
+            <li>Check <code>http://127.0.0.1:3762/api/health</code>.</li>
+            <li>Keep the local Canvas tab open for screenshot capture.</li>
+            <li>Use <code>CANVAS_PORT</code> if port 3762 is occupied.</li>
+          </ul>
+
+          <h3>Update</h3>
+          <pre>npx @cogniboom/canvas@latest setup</pre>
+        </aside>
+      </section>
+    </main>
+  </body>
+</html>
