@@ -6,6 +6,7 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import readline from 'node:readline';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 process.env.COGNIBOOM_CANVAS_PACKAGE_MODE ??= '1';
@@ -103,13 +104,252 @@ async function checkAndAutoUpdate() {
 
 const setupPageUrl = 'https://cogniboom.com/cogniboom-canvas/setup.html';
 
-function openSetupPage() {
-  console.log(`Cogniboom Canvas setup guide: ${setupPageUrl}`);
-  if (process.env.CANVAS_NO_OPEN === '1' || process.argv.includes('--no-open')) return;
-  const cmd = process.platform === 'win32' ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', setupPageUrl] : [setupPageUrl];
-  const child = spawn(cmd, args, { detached: true, stdio: 'ignore' });
-  child.unref();
+// ── Client registry ──────────────────────────────────────────────────────────
+
+function getClients() {
+  const home = os.homedir();
+  const win = process.platform === 'win32';
+  const mac = process.platform === 'darwin';
+
+  const vscodeUserDir = win
+    ? path.join(process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming'), 'Code', 'User')
+    : mac
+      ? path.join(home, 'Library', 'Application Support', 'Code', 'User')
+      : path.join(process.env.XDG_CONFIG_HOME ?? path.join(home, '.config'), 'Code', 'User');
+
+  const vscodeStorage = path.join(vscodeUserDir, 'globalStorage');
+
+  const windsurfDir = win
+    ? path.join(process.env.USERPROFILE ?? home, '.codeium', 'windsurf')
+    : path.join(home, '.codeium', 'windsurf');
+
+  const zedConfigDir = win
+    ? path.join(process.env.APPDATA ?? '', 'Zed')
+    : path.join(process.env.XDG_CONFIG_HOME ?? path.join(home, '.config'), 'zed');
+
+  const claudeDesktopConfigPath = win
+    ? path.join(process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json')
+    : mac
+      ? path.join(home, 'Library', 'Application Support', 'Claude', 'claude_desktop_config.json')
+      : path.join(process.env.XDG_CONFIG_HOME ?? path.join(home, '.config'), 'claude', 'claude_desktop_config.json');
+
+  return [
+    {
+      id: 'claude-code',
+      name: 'Claude Code',
+      detect: () => {
+        const cmd = win ? 'where' : 'which';
+        try { return spawnSync(cmd, ['claude'], { encoding: 'utf8', stdio: 'pipe' }).status === 0; }
+        catch { return false; }
+      },
+      configure: async () => {
+        const r = spawnSync('claude', ['mcp', 'add', 'canvas', 'canvas', 'serve'], { encoding: 'utf8', stdio: 'pipe' });
+        const out = (r.stdout ?? '') + (r.stderr ?? '');
+        if (r.status === 0) return { ok: true };
+        if (out.toLowerCase().includes('already')) return { ok: true, already: true };
+        return { ok: false };
+      },
+      manual: () => `  Run: claude mcp add canvas canvas serve`,
+    },
+    {
+      id: 'claude-desktop',
+      name: 'Claude Desktop',
+      configPath: claudeDesktopConfigPath,
+      detect: () => fs.existsSync(claudeDesktopConfigPath),
+      mergeKey: 'mcpServers',
+      note: 'Restart Claude Desktop to apply.',
+      manual: () => `  File: ${claudeDesktopConfigPath}\n  Add:\n${jsonSnippet('mcpServers')}`,
+    },
+    {
+      id: 'cursor',
+      name: 'Cursor',
+      configPath: path.join(home, '.cursor', 'mcp.json'),
+      detect: () => fs.existsSync(path.join(home, '.cursor')),
+      mergeKey: 'mcpServers',
+      manual: () => `  File: ${path.join(home, '.cursor', 'mcp.json')}\n  Add:\n${jsonSnippet('mcpServers')}`,
+    },
+    {
+      id: 'windsurf',
+      name: 'Windsurf',
+      configPath: path.join(windsurfDir, 'mcp_config.json'),
+      detect: () => fs.existsSync(windsurfDir),
+      mergeKey: 'mcpServers',
+      manual: () => `  File: ${path.join(windsurfDir, 'mcp_config.json')}\n  Add:\n${jsonSnippet('mcpServers')}`,
+    },
+    {
+      id: 'vscode',
+      name: 'VS Code (Copilot)',
+      configPath: path.join(vscodeUserDir, 'mcp.json'),
+      detect: () => fs.existsSync(vscodeUserDir),
+      mergeKey: 'servers',
+      note: 'Reload VS Code to apply (Ctrl+Shift+P → "Developer: Reload Window").',
+      manual: () => `  File: ${path.join(vscodeUserDir, 'mcp.json')}\n  Add:\n${jsonSnippet('servers')}`,
+    },
+    {
+      id: 'zed',
+      name: 'Zed',
+      configPath: path.join(zedConfigDir, 'settings.json'),
+      detect: () => fs.existsSync(zedConfigDir),
+      mergeKey: 'context_servers',
+      manual: () => `  File: ${path.join(zedConfigDir, 'settings.json')}\n  Add:\n${jsonSnippet('context_servers')}`,
+    },
+    {
+      id: 'cline',
+      name: 'Cline',
+      configPath: path.join(vscodeStorage, 'saoudrizwan.claude-dev', 'settings', 'cline_mcp_settings.json'),
+      detect: () => fs.existsSync(path.join(vscodeStorage, 'saoudrizwan.claude-dev')),
+      mergeKey: 'mcpServers',
+      manual: () => `  File: [VS Code globalStorage]/saoudrizwan.claude-dev/settings/cline_mcp_settings.json\n  Add:\n${jsonSnippet('mcpServers')}`,
+    },
+    {
+      id: 'roo-code',
+      name: 'Roo Code',
+      configPath: path.join(vscodeStorage, 'rooveterinaryinc.roo-cline', 'settings', 'mcp_settings.json'),
+      detect: () => fs.existsSync(path.join(vscodeStorage, 'rooveterinaryinc.roo-cline')),
+      mergeKey: 'mcpServers',
+      manual: () => `  File: [VS Code globalStorage]/rooveterinaryinc.roo-cline/settings/mcp_settings.json\n  Add:\n${jsonSnippet('mcpServers')}`,
+    },
+    {
+      id: 'jetbrains',
+      name: 'JetBrains (Junie)',
+      configPath: path.join(home, '.junie', 'mcp', 'mcp.json'),
+      detect: () => fs.existsSync(path.join(home, '.junie')),
+      mergeKey: 'mcpServers',
+      manual: () => `  File: ~/.junie/mcp/mcp.json\n  Add:\n${jsonSnippet('mcpServers')}`,
+    },
+    {
+      id: 'continue',
+      name: 'Continue.dev',
+      detect: () => fs.existsSync(path.join(home, '.continue')),
+      manual: () => `  File: ~/.continue/config.yaml\n  Add:\n\n    mcpServers:\n      - name: canvas\n        command: canvas\n        args:\n          - serve\n`,
+    },
+  ];
+}
+
+function jsonSnippet(rootKey) {
+  const obj = { [rootKey]: { canvas: { command: 'canvas', args: ['serve'] } } };
+  return JSON.stringify(obj, null, 2).split('\n').map(l => '  ' + l).join('\n');
+}
+
+function readJsonFileSafe(filePath) {
+  try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return null; }
+}
+
+function writeJsonFile(filePath, data) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
+}
+
+function safeDetect(client) {
+  try { return client.detect(); } catch { return false; }
+}
+
+async function configureClientAuto(client) {
+  if (client.configure) {
+    try {
+      const result = await client.configure();
+      if (result.already) {
+        console.log(`  ✓ ${client.name} — already configured`);
+      } else if (result.ok) {
+        console.log(`  ✓ ${client.name} — configured`);
+      } else {
+        console.log(`  ~ ${client.name} — run manually:\n${client.manual()}\n`);
+      }
+    } catch {
+      console.log(`  ~ ${client.name} — run manually:\n${client.manual()}\n`);
+    }
+    return;
+  }
+
+  if (!client.mergeKey || !client.configPath) {
+    console.log(`  ~ ${client.name} — manual setup:\n${client.manual()}\n`);
+    return;
+  }
+
+  try {
+    const existing = readJsonFileSafe(client.configPath) ?? {};
+    if (typeof existing[client.mergeKey] !== 'object' || !existing[client.mergeKey]) {
+      existing[client.mergeKey] = {};
+    }
+    existing[client.mergeKey].canvas = { command: 'canvas', args: ['serve'] };
+    writeJsonFile(client.configPath, existing);
+    let line = `  ✓ ${client.name} — configured`;
+    if (client.note) line += `\n    ${client.note}`;
+    console.log(line + '\n');
+  } catch {
+    console.log(`  ~ ${client.name} — auto-configure failed:\n${client.manual()}\n`);
+  }
+}
+
+function printAllInstructions(clients) {
+  console.log('');
+  for (const client of clients) {
+    console.log(`── ${client.name} ${'─'.repeat(Math.max(0, 42 - client.name.length))}`);
+    console.log(client.manual());
+    console.log('');
+  }
+}
+
+function askQuestion(question) {
+  return new Promise(resolve => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, answer => { rl.close(); resolve(answer.trim()); });
+  });
+}
+
+async function runSetup() {
+  console.log(`\nCogniboom Canvas v${packageJson.version}\n${'─'.repeat(28)}\n`);
+
+  const clients = getClients();
+  const detected = clients.filter(safeDetect);
+  const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
+
+  if (!isInteractive) {
+    // postinstall or piped — auto-configure detected, print the rest
+    if (detected.length > 0) {
+      console.log('Configuring detected AI clients:\n');
+      for (const client of detected) await configureClientAuto(client);
+    } else {
+      console.log('No AI clients auto-detected.\n');
+    }
+    const rest = clients.filter(c => !safeDetect(c));
+    if (rest.length > 0) {
+      console.log('Other supported clients — add manually:');
+      printAllInstructions(rest);
+    }
+  } else {
+    // Interactive terminal
+    if (detected.length > 0) {
+      console.log(`Detected: ${detected.map(c => c.name).join('  ')}\n`);
+      console.log('  [1] Configure detected clients automatically');
+      console.log('  [2] Other — view all clients with setup instructions');
+      console.log('  [s] Skip\n');
+
+      const ans = await askQuestion('> ');
+
+      if (ans === '1' || ans === '') {
+        console.log('');
+        for (const client of detected) await configureClientAuto(client);
+      } else if (ans === '2') {
+        printAllInstructions(clients);
+      }
+    } else {
+      console.log('No AI clients auto-detected.\n');
+      console.log('  [1] View all supported clients with setup instructions');
+      console.log('  [s] Skip\n');
+
+      const ans = await askQuestion('> ');
+      if (ans === '1' || ans === '') printAllInstructions(clients);
+    }
+  }
+
+  console.log(`Start the server:
+  canvas serve    stdio — launched automatically by your AI client
+  canvas http     HTTP  — run persistently at ${mcpHttpUrl}
+
+Commands: canvas serve | http | setup | doctor | version
+Docs:     ${setupPageUrl}
+`);
 }
 
 function checkPort() {
@@ -184,7 +424,7 @@ async function main() {
   }
 
   if (command === 'setup') {
-    openSetupPage();
+    await runSetup();
     return;
   }
 
@@ -202,7 +442,7 @@ http: ${mcpHttpUrl}`);
   }
 
   if (command === 'update') {
-    openSetupPage();
+    await runSetup();
     return;
   }
 

@@ -1,6 +1,6 @@
 {
   "name": "@cogniboom/canvas",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local Cogniboom Canvas app server and MCP helper.",
   "type": "module",
   "bin": {
@@ -21,7 +21,8 @@
     "README.md"
   ],
   "scripts": {
-    "pack:dry": "npm pack --dry-run"
+    "pack:dry": "npm pack --dry-run",
+    "postinstall": "node bin/canvas-mcp.js setup"
   },
   "engines": {
     "node": ">=18"
