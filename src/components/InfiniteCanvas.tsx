@@ -57,6 +57,18 @@ function pressureFactor(pressure: number, min: number): number {
   return min + (1 - min) * pressure;
 }
 
+// Returns true only when pressure data contains meaningful variation (i.e. a real
+// pen/stylus). Mouse and trackpad always report pressure=1, making all segments
+// identical — no need for per-segment rendering in that case.
+function hasMeaningfulPressureVariation(pressures: number[]): boolean {
+  if (pressures.length < 2) return false;
+  const first = pressures[0];
+  for (let i = 1; i < pressures.length; i++) {
+    if (Math.abs(pressures[i] - first) > 0.05) return true;
+  }
+  return false;
+}
+
 function PressureStrokeLines({
   points,
   pressures,
@@ -91,7 +103,16 @@ function PressureStrokeLines({
     layer.batchDraw();
   }, [points, pressures, opacity, color, size, pressureSize, pressureOpacity, pressureMin]);
 
-  const usePressure = pressures && pressures.length >= points.length / 2 && (pressureSize || pressureOpacity);
+  // Only use per-segment rendering when pressure actually varies meaningfully.
+  // Mouse/trackpad input always returns pressure=1 for every point, so all
+  // segments would be identical — N-1 Konva nodes for no visual gain.
+  // Fall through to the single-Line path whenever pressure is uniform.
+  const usePressure = !!(
+    pressures &&
+    pressures.length >= points.length / 2 &&
+    (pressureSize || pressureOpacity) &&
+    hasMeaningfulPressureVariation(pressures)
+  );
 
   if (!usePressure) {
     return (
@@ -1175,23 +1196,48 @@ export default function InfiniteCanvas() {
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      if (k === 'v') setTool('select');
-      if (k === 'h') setTool('pan');
-      if (k === 'p') setTool('pen');
-      if (k === 'e') setTool('eraser');
-      if (k === 'r') setTool('rect');
-      if (k === 'o') setTool('ellipse');
-      if (k === 'l') setTool('line');
-      if (k === 'a') setTool('arrow');
-      if (k === 't') setTool('text');
-      if (k === 'f') setTool('frame');
-      if (k === 'i') setTool('imageFrame');
-      if (k === 'u') setTool('siteFrame');
-      if ((k === 'delete' || k === 'backspace') && selectedIds.length > 0) removeObjects(selectedIds);
+      if (k === '1') { setTool('select'); return; }
+      if (k === '2') { setTool('pen'); return; }
+      if (k === '3') { setTool('rect'); return; }
+      if (k === '4') { setTool('ellipse'); return; }
+      if (k === '5') { setTool('arrow'); return; }
+      if (k === '6') { setTool('line'); return; }
+      if (k === '7') { setTool('text'); return; }
+      if (k === '8') { setTool('imageFrame'); return; }
+      if (k === '9') { setTool('frame'); return; }
+      if (k === '0') { setTool('eraser'); return; }
+      if (e.key === '[' || e.key === ']') {
+        const s = useCanvasStore.getState();
+        const inc = e.key === ']' ? 1 : -1;
+        if (s.tool === 'pen' || s.tool === 'eraser') {
+          s.setBrushSize(Math.max(1, Math.min(80, s.brushSize + inc)));
+        } else if (s.tool === 'rect' || s.tool === 'ellipse' || s.tool === 'arrow' || s.tool === 'line') {
+          s.setShapeStrokeWidth(Math.max(0, Math.min(40, s.shapeStrokeWidth + inc)));
+        }
+        return;
+      }
+      if ((k === 'delete' || k === 'backspace') && selectedIds.length > 0) { removeObjects(selectedIds); return; }
       if (k === 'escape') {
         setSelectedIds([]);
         setOutpaintFrameId(null);
         setRadialMenuPos(null);
+        return;
+      }
+      // Any letter key → create text box at current cursor position
+      if (/^[a-z]$/i.test(e.key)) {
+        const worldPos = lastCanvasPointerRef.current;
+        if (!worldPos) return;
+        const stage = stageRef.current;
+        const screenPos = stage ? stage.getAbsoluteTransform().point(worldPos) : worldPos;
+        e.preventDefault();
+        setTextOverlay({ x: screenPos.x, y: screenPos.y, worldX: worldPos.x, worldY: worldPos.y });
+        setTimeout(() => {
+          if (textInputRef.current) {
+            textInputRef.current.value = e.key;
+            textInputRef.current.setSelectionRange(1, 1);
+            textInputRef.current.focus();
+          }
+        }, 0);
       }
     };
     const onKeyUp = (e: globalThis.KeyboardEvent) => {
@@ -1253,6 +1299,7 @@ export default function InfiniteCanvas() {
     internalClipboardRef.current = clones;
     setTool('select');
     justCreatedRef.current = true;
+    window.requestAnimationFrame(() => { justCreatedRef.current = false; });
     return true;
   }, [addObjects, setTool]);
 
@@ -1277,6 +1324,7 @@ export default function InfiniteCanvas() {
     }], [id]);
     setTool('select');
     justCreatedRef.current = true;
+    window.requestAnimationFrame(() => { justCreatedRef.current = false; });
     return true;
   }, [addObjects, fontColor, fontSize, setTool]);
 
@@ -1317,6 +1365,7 @@ export default function InfiniteCanvas() {
     addObjects(newObjects, newObjects.map((obj) => obj.id));
     setTool('select');
     justCreatedRef.current = true;
+    window.requestAnimationFrame(() => { justCreatedRef.current = false; });
     return true;
   }, [addObjects, incrementFrameCount, setTool]);
 
@@ -1446,14 +1495,24 @@ export default function InfiniteCanvas() {
     e.evt.preventDefault();
     const stage = stageRef.current;
     if (!stage) return;
-    const ptr = stage.getPointerPosition();
-    if (!ptr) return;
-    const old = stage.scaleX();
-    const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, old * Math.pow(ZOOM_FACTOR, e.evt.deltaY < 0 ? 1 : -1)));
-    const nx = ptr.x - (ptr.x - stage.x()) / old * next;
-    const ny = ptr.y - (ptr.y - stage.y()) / old * next;
-    stage.scale({ x: next, y: next });
-    stage.position({ x: nx, y: ny });
+
+    if (e.evt.ctrlKey || e.evt.metaKey) {
+      // Ctrl/Cmd + scroll → zoom anchored to pointer
+      const ptr = stage.getPointerPosition();
+      if (!ptr) return;
+      const old = stage.scaleX();
+      const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, old * Math.pow(ZOOM_FACTOR, e.evt.deltaY < 0 ? 1 : -1)));
+      const nx = ptr.x - (ptr.x - stage.x()) / old * next;
+      const ny = ptr.y - (ptr.y - stage.y()) / old * next;
+      stage.scale({ x: next, y: next });
+      stage.position({ x: nx, y: ny });
+    } else {
+      // Plain scroll → pan; Shift swaps axes
+      const dx = e.evt.shiftKey ? e.evt.deltaY : e.evt.deltaX;
+      const dy = e.evt.shiftKey ? e.evt.deltaX : e.evt.deltaY;
+      stage.position({ x: stage.x() - dx, y: stage.y() - dy });
+    }
+
     stage.batchDraw();
     syncAllOverlays();
     commitStageTransform(90);
@@ -1677,6 +1736,10 @@ export default function InfiniteCanvas() {
     if (activePointerIdRef.current != null && nev.pointerId !== activePointerIdRef.current) return;
     stage.setPointersPositions(nev);
 
+    // Always track hover position so keyboard shortcuts (e.g. letter → text) land at the cursor.
+    const hoverPtr = stage.getPointerPosition();
+    if (hoverPtr) lastCanvasPointerRef.current = screenToWorld(hoverPtr.x, hoverPtr.y);
+
     // Wacom hover: stylus near the tablet surface but not touching — buttons === 0.
     // Skip completely; we only process motion when something is actively pressed.
     const hasActiveGesture =
@@ -1808,6 +1871,7 @@ export default function InfiniteCanvas() {
           .map((obj) => obj.id);
         setSelectedIds(hit);
         justCreatedRef.current = true; // prevent stage onClick from immediately deselecting
+        window.requestAnimationFrame(() => { justCreatedRef.current = false; });
       }
       return;
     }
@@ -1858,6 +1922,7 @@ export default function InfiniteCanvas() {
 
       const commit = (id: string) => {
         justCreatedRef.current = true; // block the upcoming onClick from deselecting
+        window.requestAnimationFrame(() => { justCreatedRef.current = false; });
         setSelectedIds([id]);
       };
 
@@ -1950,6 +2015,7 @@ export default function InfiniteCanvas() {
         return;
       }
       e.cancelBubble = true;
+      justCreatedRef.current = false;
 
       // Context picker: clicking a non-selected frame toggles its context inclusion.
       // Guard against pointerdown — FrameRenderer binds onSelect to both onPointerDown
@@ -1997,6 +2063,7 @@ export default function InfiniteCanvas() {
               .map((c) => c.id);
             addObjects(clones, topLevelIds);
             justCreatedRef.current = true;
+            window.requestAnimationFrame(() => { justCreatedRef.current = false; });
           }
         } else {
           altDupIdRef.current = null;
@@ -2244,6 +2311,7 @@ export default function InfiniteCanvas() {
       setTool('select');
       if (newId) {
         justCreatedRef.current = true;
+        window.requestAnimationFrame(() => { justCreatedRef.current = false; });
         setSelectedIds([newId]);
       }
     }
@@ -2323,7 +2391,7 @@ export default function InfiniteCanvas() {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onClick={handleStageClick}
-        style={{ background: '#111', touchAction: 'none' }}
+        style={{ background: 'var(--theme-bg)', touchAction: 'none' }}
       >
         {/* All objects */}
         <Layer listening={tool === 'select' || isFrameTool(tool)}>
@@ -2601,7 +2669,7 @@ export default function InfiniteCanvas() {
             <PressureStrokeLines
               points={livePoints}
               pressures={tool === 'pen' ? livePressures : undefined}
-              color={tool === 'eraser' ? '#111111' : brushColor}
+              color={tool === 'eraser' ? '#aaaaaa' : brushColor}
               size={tool === 'eraser' ? brushSize * 2 : brushSize}
               opacity={brushOpacity}
               pressureSize={tool === 'pen' && pressureSize}

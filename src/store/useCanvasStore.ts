@@ -121,6 +121,10 @@ interface CanvasState {
   updatedAt: string;
   renameDocument: (name: string) => void;
 
+  // Theme
+  theme: 'dark' | 'light';
+  setTheme: (t: 'dark' | 'light') => void;
+
   // Active tool
   tool: ToolType;
   setTool: (tool: ToolType) => void;
@@ -309,7 +313,7 @@ function stateFromScene(scene: CanvasScene): Partial<CanvasState> {
     stageY: scene.stageY ?? 0,
     stageScale: scene.stageScale ?? 1,
     frameCount: scene.frameCount ?? objects.filter((obj) => obj.type === 'frame').length,
-    brushColor: scene.brushColor ?? '#ffffff',
+    brushColor: scene.brushColor ?? '#1a1a1a',
     brushSize: scene.brushSize ?? 6,
     brushOpacity: scene.brushOpacity ?? 1,
     pressureSize: scene.pressureSize ?? true,
@@ -317,10 +321,10 @@ function stateFromScene(scene: CanvasScene): Partial<CanvasState> {
     pressureMin: scene.pressureMin ?? 0.25,
     shapeType: scene.shapeType ?? 'rect',
     fillColor: scene.fillColor ?? 'transparent',
-    shapeStrokeColor: scene.shapeStrokeColor ?? '#ffffff',
+    shapeStrokeColor: scene.shapeStrokeColor ?? '#1a1a1a',
     shapeStrokeWidth: scene.shapeStrokeWidth ?? 2,
     fontSize: scene.fontSize ?? 24,
-    fontColor: scene.fontColor ?? '#ffffff',
+    fontColor: scene.fontColor ?? '#1a1a1a',
     outpaintFrameId: null,
     contextFrameIds: [],
     contextPickerActive: false,
@@ -372,6 +376,7 @@ function persistedState(s: CanvasState): Partial<CanvasState> {
   const scene = sceneFromState(s);
   return {
     ...stateFromScene(scene),
+    theme: s.theme,
     penMode: s.penMode,
     keepToolActive: s.keepToolActive,
     tool: s.tool,
@@ -389,6 +394,7 @@ function sanitizePersistedState(value: unknown): Partial<CanvasState> {
   const state = value as Partial<CanvasState>;
   return {
     ...state,
+    theme: state.theme === 'light' ? 'light' : 'dark',
     objects: sanitizeObjects(Array.isArray(state.objects) ? state.objects : []),
     selectedIds: Array.isArray(state.selectedIds) && Array.isArray(state.objects)
       ? filterSelectedIds(state.selectedIds, state.objects)
@@ -426,6 +432,9 @@ export const useCanvasStore = create<CanvasState>()(persist((set, get) => ({
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   renameDocument: (name) => set({ documentName: name.trim() || 'Untitled canvas', ...touchUpdatedAt() }),
+
+  theme: 'light',
+  setTheme: (t) => set({ theme: t }),
 
   tool: 'pen',
   setTool: (tool) => set({ tool }),
@@ -548,7 +557,7 @@ export const useCanvasStore = create<CanvasState>()(persist((set, get) => ({
   selectedIds: [],
   setSelectedIds: (ids) => set((s) => ({ selectedIds: filterSelectedIds(ids, s.objects) })),
 
-  brushColor: '#ffffff',
+  brushColor: '#1a1a1a',
   setBrushColor: (c) => set({ brushColor: c }),
   brushSize: 6,
   setBrushSize: (s) => set({ brushSize: s }),
@@ -566,14 +575,14 @@ export const useCanvasStore = create<CanvasState>()(persist((set, get) => ({
 
   fillColor: 'transparent',
   setFillColor: (c) => set({ fillColor: c }),
-  shapeStrokeColor: '#ffffff',
+  shapeStrokeColor: '#1a1a1a',
   setShapeStrokeColor: (c) => set({ shapeStrokeColor: c }),
   shapeStrokeWidth: 2,
   setShapeStrokeWidth: (w) => set({ shapeStrokeWidth: w }),
 
   fontSize: 24,
   setFontSize: (s) => set({ fontSize: s }),
-  fontColor: '#ffffff',
+  fontColor: '#1a1a1a',
   setFontColor: (c) => set({ fontColor: c }),
 
   isGenerating: false,

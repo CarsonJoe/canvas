@@ -1,11 +1,19 @@
+import { useEffect } from 'react';
 import InfiniteCanvas from './components/InfiniteCanvas';
 import LeftToolbar from './components/LeftToolbar';
 import BottomBar from './components/BottomBar';
 import LocalDocumentBridge from './components/LocalDocumentBridge';
 import LlmChangesToast from './components/LlmChangesToast';
 import SceneMenu from './components/SceneMenu';
+import { useCanvasStore } from './store/useCanvasStore';
 
 export default function App() {
+  const theme = useCanvasStore((s) => s.theme);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
+
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
       <LocalDocumentBridge />

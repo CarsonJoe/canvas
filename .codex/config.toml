@@ -1,0 +1,7 @@
+[mcp_servers.canvas]
+args = ["serve"]
+command = "canvas"
+
+[mcp_servers.cogniboom-canvas]
+args = ["serve"]
+command = "canvas"

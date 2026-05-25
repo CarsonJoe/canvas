@@ -25,18 +25,18 @@ interface ToolDef {
 }
 
 const TOOLS: ToolDef[] = [
-  { id: 'select',  icon: MousePointer2, label: 'Select',    shortcut: 'V' },
-  { id: 'pan',     icon: Hand,          label: 'Pan',        shortcut: 'H' },
-  { id: 'pen',     icon: Pen,           label: 'Pen',        shortcut: 'P' },
-  { id: 'eraser',  icon: Eraser,        label: 'Eraser',     shortcut: 'E' },
-  { id: 'rect',    icon: Square,        label: 'Rectangle',  shortcut: 'R' },
-  { id: 'ellipse', icon: Circle,        label: 'Ellipse',    shortcut: 'O' },
-  { id: 'line',    icon: Minus,         label: 'Line',       shortcut: 'L' },
-  { id: 'arrow',   icon: ArrowUpRight,  label: 'Arrow',      shortcut: 'A' },
-  { id: 'text',    icon: Type,          label: 'Text',       shortcut: 'T' },
-  { id: 'frame',      icon: Frame,          label: 'Frame',       shortcut: 'F' },
-  { id: 'imageFrame', icon: Image,          label: 'Image',       shortcut: 'I' },
-  { id: 'siteFrame',  icon: Globe,          label: 'Site Preview', shortcut: 'U' },
+  { id: 'pan',        icon: Hand,          label: 'Pan',          shortcut: '' },
+  { id: 'select',     icon: MousePointer2, label: 'Select',       shortcut: '1' },
+  { id: 'pen',        icon: Pen,           label: 'Pen',          shortcut: '2' },
+  { id: 'rect',       icon: Square,        label: 'Rectangle',    shortcut: '3' },
+  { id: 'ellipse',    icon: Circle,        label: 'Ellipse',      shortcut: '4' },
+  { id: 'arrow',      icon: ArrowUpRight,  label: 'Arrow',        shortcut: '5' },
+  { id: 'line',       icon: Minus,         label: 'Line',         shortcut: '6' },
+  { id: 'text',       icon: Type,          label: 'Text',         shortcut: '7' },
+  { id: 'imageFrame', icon: Image,         label: 'Image',        shortcut: '8' },
+  { id: 'frame',      icon: Frame,         label: 'Frame',        shortcut: '9' },
+  { id: 'eraser',     icon: Eraser,        label: 'Eraser',       shortcut: '0' },
+  { id: 'siteFrame',  icon: Globe,         label: 'Site Preview', shortcut: '' },
 ];
 
 export default function LeftToolbar() {
@@ -47,8 +47,8 @@ export default function LeftToolbar() {
       style={{
         width: 64,
         height: '100%',
-        background: '#1a1a1a',
-        borderRight: '1px solid #2a2a2a',
+        background: 'var(--theme-toolbar-bg)',
+        borderRight: '1px solid var(--theme-toolbar-border)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -67,7 +67,7 @@ export default function LeftToolbar() {
         return (
           <button
             key={t.id}
-            title={`${t.label} (${t.shortcut})`}
+            title={t.shortcut ? `${t.label} (${t.shortcut})` : t.label}
             onClick={() => setTool(t.id)}
             style={{
               width: 44,
@@ -75,22 +75,36 @@ export default function LeftToolbar() {
               borderRadius: 10,
               border: 'none',
               background: active ? '#6366f1' : 'transparent',
-              color: active ? '#fff' : '#888',
+              color: active ? '#fff' : 'var(--theme-icon-idle)',
               cursor: 'pointer',
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
+              gap: 1,
               transition: 'background 0.12s, color 0.12s',
               outline: 'none',
+              position: 'relative',
             }}
             onMouseEnter={(e) => {
-              if (!active) (e.currentTarget as HTMLButtonElement).style.background = '#2a2a2a';
+              if (!active) (e.currentTarget as HTMLButtonElement).style.background = 'var(--theme-icon-hover-bg)';
             }}
             onMouseLeave={(e) => {
               if (!active) (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
             }}
           >
-            <Icon size={18} strokeWidth={1.8} />
+            <Icon size={16} strokeWidth={1.8} />
+            {t.shortcut && (
+              <span style={{
+                fontSize: 9,
+                lineHeight: 1,
+                opacity: active ? 0.8 : 0.45,
+                fontFamily: 'monospace',
+                letterSpacing: 0,
+              }}>
+                {t.shortcut}
+              </span>
+            )}
           </button>
         );
       })}
@@ -106,8 +120,8 @@ export default function LeftToolbar() {
           height: 44,
           borderRadius: 10,
           border: 'none',
-          background: penMode ? '#3b3f8f' : 'transparent',
-          color: penMode ? '#fff' : '#888',
+          background: penMode ? '#6366f1' : 'transparent',
+          color: penMode ? '#fff' : 'var(--theme-icon-idle)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -127,8 +141,8 @@ export default function LeftToolbar() {
           height: 44,
           borderRadius: 10,
           border: 'none',
-          background: keepToolActive ? '#3b3f8f' : 'transparent',
-          color: keepToolActive ? '#fff' : '#888',
+          background: keepToolActive ? '#6366f1' : 'transparent',
+          color: keepToolActive ? '#fff' : 'var(--theme-icon-idle)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',

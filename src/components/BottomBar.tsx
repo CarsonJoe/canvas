@@ -195,14 +195,14 @@ function ColorPickerPopup({
     <div
       style={{
         width: 240,
-        background: '#1c1c1c',
-        border: '1px solid #2a2a2a',
+        background: 'var(--theme-menu-bg)',
+        border: '1px solid var(--theme-toolbar-border)',
         borderRadius: 12,
         padding: 12,
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.75)',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.35)',
         userSelect: 'none',
       }}
     >
@@ -242,7 +242,7 @@ function ColorPickerPopup({
                 emit(h, s, v, a);
               }}
               style={{
-                width: 20, height: 20, borderRadius: 4, border: '1.5px solid #444',
+                width: 20, height: 20, borderRadius: 4, border: '1.5px solid var(--theme-swatch-border)',
                 background: rc, cursor: 'pointer', flexShrink: 0,
               }}
             />
@@ -252,19 +252,19 @@ function ColorPickerPopup({
 
       {/* Hex input + preview + transparent */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <div style={{ width: 26, height: 26, borderRadius: 6, background: currentColor, border: '1.5px solid #444', flexShrink: 0 }} />
+        <div style={{ width: 26, height: 26, borderRadius: 6, background: currentColor, border: '1.5px solid var(--theme-swatch-border)', flexShrink: 0 }} />
         <input
           type="text"
           value={hexInput}
           onChange={(e) => setHexInput(e.target.value)}
           onBlur={commitHex}
           onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitHex(); } e.stopPropagation(); }}
-          style={{ flex: 1, background: '#111', border: '1px solid #333', borderRadius: 6, color: '#ccc', fontSize: 12, padding: '4px 8px', outline: 'none', fontFamily: 'monospace' }}
+          style={{ flex: 1, background: 'var(--theme-input-bg)', border: '1px solid var(--theme-input-border)', borderRadius: 6, color: 'var(--theme-text-dim)', fontSize: 12, padding: '4px 8px', outline: 'none', fontFamily: 'monospace' }}
         />
         <button
           onClick={() => onChange('transparent')}
           title="Transparent"
-          style={{ width: 26, height: 26, borderRadius: 6, border: '1.5px solid #444', background: CHECKER, cursor: 'pointer', flexShrink: 0 }}
+          style={{ width: 26, height: 26, borderRadius: 6, border: '1.5px solid var(--theme-swatch-border)', background: CHECKER, cursor: 'pointer', flexShrink: 0 }}
         />
       </div>
 
@@ -293,13 +293,13 @@ function Swatch({ color, onClick }: { color: MixedValue<string>; onClick: () => 
         width: color === MIXED ? 48 : 28,
         height: 28,
         borderRadius: 6,
-        border: '2px solid #444',
+        border: '2px solid var(--theme-swatch-border)',
         background: color === MIXED
-          ? '#1e1e1e'
+          ? 'var(--theme-surface)'
           : color === 'transparent'
-          ? 'repeating-conic-gradient(#333 0% 25%, #555 0% 50%) 0 0 / 8px 8px'
+          ? 'repeating-conic-gradient(#888 0% 25%, #ccc 0% 50%) 0 0 / 8px 8px'
           : color,
-        color: '#aaa',
+        color: 'var(--theme-text-muted)',
         fontSize: 10,
         cursor: 'pointer',
         flexShrink: 0,
@@ -337,7 +337,7 @@ function ColorRow({
 
   return (
     <div ref={containerRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6 }}>
-      <span style={{ fontSize: 11, color: '#666', whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ fontSize: 11, color: 'var(--theme-text-muted)', whiteSpace: 'nowrap' }}>{label}</span>
       <Swatch color={color} onClick={() => setOpen((v) => !v)} />
       {open && (
         <div style={{ position: 'absolute', bottom: 44, left: 0, zIndex: 100 }}>
@@ -427,15 +427,15 @@ function Slider({
         gap: 5,
         padding: '4px 8px',
         borderRadius: 6,
-        background: active ? '#2a2a3a' : '#1e1e1e',
-        border: `1px solid ${active || editing ? '#6366f1' : '#2a2a2a'}`,
+        background: active ? 'var(--theme-surface-active)' : 'var(--theme-surface)',
+        border: `1px solid ${active || editing ? '#6366f1' : 'var(--theme-toolbar-border)'}`,
         cursor: editing ? 'default' : 'ew-resize',
         userSelect: 'none',
         flexShrink: 0,
         transition: 'background 0.1s, border-color 0.1s',
       }}
     >
-      <span style={{ fontSize: 11, color: '#555', whiteSpace: 'nowrap' }}>{label}</span>
+      <span style={{ fontSize: 11, color: 'var(--theme-text-muted)', whiteSpace: 'nowrap' }}>{label}</span>
       {editing ? (
         <input
           type="text"
@@ -452,7 +452,7 @@ function Slider({
             width: 36,
             background: 'transparent',
             border: 'none',
-            color: '#ccc',
+            color: 'var(--theme-text-dim)',
             fontSize: 11,
             outline: 'none',
             textAlign: 'right',
@@ -464,7 +464,7 @@ function Slider({
         <span
           onClick={startEdit}
           onMouseDown={(e) => e.stopPropagation()}
-          style={{ fontSize: 11, color: '#ccc', minWidth: 20, textAlign: 'right', fontVariantNumeric: 'tabular-nums', cursor: 'text' }}
+          style={{ fontSize: 11, color: 'var(--theme-text-dim)', minWidth: 20, textAlign: 'right', fontVariantNumeric: 'tabular-nums', cursor: 'text' }}
         >
           {value === MIXED ? MIXED : format ? format(value) : value}
         </span>
@@ -482,7 +482,7 @@ function PenPanel() {
     <>
       <ColorRow label="Color" color={brushColor} onChange={setBrushColor} />
       <Divider />
-      <Slider label="Size" value={brushSize} min={1} max={80} step={1} onChange={setBrushSize} />
+      <Slider label="Width" value={brushSize} min={1} max={80} step={1} onChange={setBrushSize} />
       <Slider
         label="Opacity"
         value={Math.round(brushOpacity * 100)}
@@ -656,7 +656,7 @@ function SelectedObjectsPanel({ objects }: { objects: CanvasObject[] }) {
       <>
         <ColorRow label="Color" color={sharedValue(strokes, (obj) => obj.color)} onChange={(color) => updateAll(() => ({ color }))} />
         <Divider />
-        <Slider label="Size" value={sharedValue(strokes, (obj) => obj.size)} min={1} max={80} step={1} onChange={(size) => updateAll(() => ({ size }))} />
+        <Slider label="Width" value={sharedValue(strokes, (obj) => obj.size)} min={1} max={80} step={1} onChange={(size) => updateAll(() => ({ size }))} />
         <Slider
           label="Opacity"
           value={sharedValue(strokes, (obj) => Math.round(obj.opacity * 100))}
@@ -782,7 +782,7 @@ function SelectedObjectPanel({ obj }: { obj: CanvasObject }) {
       <>
         <ColorRow label="Color" color={obj.color} onChange={(color) => update({ color })} />
         <Divider />
-        <Slider label="Size" value={obj.size} min={1} max={80} step={1} onChange={(size) => update({ size })} />
+        <Slider label="Width" value={obj.size} min={1} max={80} step={1} onChange={(size) => update({ size })} />
         <Slider
           label="Opacity"
           value={Math.round(obj.opacity * 100)}
@@ -1102,10 +1102,10 @@ function FrameToolPanel({ frame, tool: activeTool }: { frame?: FrameObject; tool
           value={selectedRatio}
           onChange={(e) => setSelectedRatio(e.target.value as typeof RATIO_PRESETS[number]['label'])}
           style={{
-            background: '#1e1e1e',
-            border: '1px solid #2a2a2a',
+            background: 'var(--theme-surface)',
+            border: '1px solid var(--theme-toolbar-border)',
             borderRadius: 6,
-            color: '#ccc',
+            color: 'var(--theme-text-dim)',
             fontSize: 12,
             padding: '4px 8px',
             cursor: 'pointer',
@@ -1142,7 +1142,7 @@ function FrameToolPanel({ frame, tool: activeTool }: { frame?: FrameObject; tool
 
   if (!frame) {
     return (
-      <span style={{ fontSize: 12, color: '#555' }}>
+      <span style={{ fontSize: 12, color: 'var(--theme-text-muted)' }}>
         Drag on the canvas to create a frame.
       </span>
     );
@@ -1209,7 +1209,7 @@ function FrameToolPanel({ frame, tool: activeTool }: { frame?: FrameObject; tool
           style={{
             background: 'transparent',
             border: 'none',
-            color: '#666',
+            color: 'var(--theme-text-muted)',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -1237,7 +1237,7 @@ function DefaultPanel({ tool }: { tool: string }) {
     line: 'Line tool — drag to draw a line',
   };
   return (
-    <span style={{ fontSize: 12, color: '#555' }}>
+    <span style={{ fontSize: 12, color: 'var(--theme-text-muted)' }}>
       {label[tool] ?? tool}
     </span>
   );
@@ -1247,15 +1247,15 @@ function DefaultPanel({ tool }: { tool: string }) {
 
 function Divider() {
   return (
-    <div style={{ width: 1, height: 28, background: '#2a2a2a', flexShrink: 0 }} />
+    <div style={{ width: 1, height: 28, background: 'var(--theme-toolbar-border)', flexShrink: 0 }} />
   );
 }
 
 const promptInputStyle: React.CSSProperties = {
-  background: '#111',
-  border: '1px solid #333',
+  background: 'var(--theme-input-bg)',
+  border: '1px solid var(--theme-input-border)',
   borderRadius: 8,
-  color: '#f1f1f1',
+  color: 'var(--theme-text)',
   fontSize: 13,
   padding: '6px 12px',
   outline: 'none',
@@ -1263,10 +1263,10 @@ const promptInputStyle: React.CSSProperties = {
 };
 
 const secondaryButtonStyle: React.CSSProperties = {
-  background: '#2a2a2a',
-  border: '1px solid #3a3a3a',
+  background: 'var(--theme-surface)',
+  border: '1px solid var(--theme-input-border)',
   borderRadius: 8,
-  color: '#f1f1f1',
+  color: 'var(--theme-text)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 600,
@@ -1302,9 +1302,9 @@ function ContextButton({
           gap: 5,
           padding: iconOnly ? '6px 7px' : '6px 10px',
           borderRadius: 8,
-          border: contextPickerActive ? '1px solid #14b8a6' : count > 0 ? '1px solid #5eead4' : '1px solid #333',
-          background: contextPickerActive ? 'rgba(20,184,166,0.12)' : '#1a1a1a',
-          color: contextPickerActive ? '#14b8a6' : count > 0 ? '#5eead4' : '#666',
+          border: contextPickerActive ? '1px solid #14b8a6' : count > 0 ? '1px solid #5eead4' : '1px solid var(--theme-input-border)',
+          background: contextPickerActive ? 'rgba(20,184,166,0.12)' : 'var(--theme-surface)',
+          color: contextPickerActive ? '#14b8a6' : count > 0 ? '#0d9488' : 'var(--theme-text-muted)',
           fontSize: 12,
           fontWeight: 600,
           cursor: 'pointer',
@@ -1321,17 +1321,17 @@ function ContextButton({
             position: 'absolute',
             bottom: 44,
             left: 0,
-            background: '#1c1c1c',
-            border: '1px solid #2a2a2a',
+            background: 'var(--theme-menu-bg)',
+            border: '1px solid var(--theme-toolbar-border)',
             borderRadius: 10,
             padding: '8px 10px',
             minWidth: 200,
             zIndex: 100,
-            boxShadow: '0 -8px 24px rgba(0,0,0,0.65)',
+            boxShadow: '0 -8px 24px rgba(0,0,0,0.2)',
           }}
         >
           {count === 0 && (
-            <div style={{ fontSize: 11, color: '#3a3a3a' }}>Click frames on canvas to add</div>
+            <div style={{ fontSize: 11, color: 'var(--theme-text-muted)' }}>Click frames on canvas to add</div>
           )}
           {contextFrameIds.map((id) => {
             const f = objects.find((o): o is FrameObject => o.type === 'frame' && o.id === id);
@@ -1347,10 +1347,10 @@ function ContextButton({
                   padding: '3px 0',
                 }}
               >
-                <span style={{ fontSize: 12, color: '#ccc' }}>{f.label}</span>
+                <span style={{ fontSize: 12, color: 'var(--theme-text-dim)' }}>{f.label}</span>
                 <button
                   onClick={() => onRemove(id)}
-                  style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', padding: '0 2px', lineHeight: 1, fontSize: 15 }}
+                  style={{ background: 'none', border: 'none', color: 'var(--theme-text-muted)', cursor: 'pointer', padding: '0 2px', lineHeight: 1, fontSize: 15 }}
                 >
                   ×
                 </button>
@@ -1378,7 +1378,7 @@ function GenButton({ onClick, loading, label, iconOnly }: { onClick: () => void;
         padding: iconOnly ? '6px 8px' : '6px 14px',
         borderRadius: 8,
         border: 'none',
-        background: loading ? '#333' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+        background: loading ? 'var(--theme-surface)' : 'linear-gradient(135deg, #6366f1, #8b5cf6)',
         color: '#fff',
         fontSize: 13,
         fontWeight: 600,
@@ -1445,16 +1445,16 @@ export default function BottomBar() {
     >
       <div
         style={{
-          background: 'rgba(22, 22, 22, 0.92)',
+          background: 'var(--theme-panel-bg)',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
-          border: '1px solid rgba(255,255,255,0.07)',
+          border: '1px solid var(--theme-panel-border)',
           borderRadius: 16,
           padding: '10px 18px',
           display: 'flex',
           alignItems: 'center',
           gap: 14,
-          boxShadow: '0 8px 40px rgba(0,0,0,0.7)',
+          boxShadow: 'none',
           minHeight: 52,
         }}
       >

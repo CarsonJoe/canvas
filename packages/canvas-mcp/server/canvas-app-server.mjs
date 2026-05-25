@@ -10,7 +10,9 @@ import {
   appUrl,
   documentPath,
   helperVersion,
+  latestChangeSeq,
   mcpHttpUrl,
+  readChangesSince,
   readDocument,
   readScreenshotRequest,
   readWorkingIds,
@@ -143,6 +145,10 @@ export function createCanvasAppServer() {
       } else if (url.pathname === '/api/working' && request.method === 'POST') {
         const body = JSON.parse(await readBody(request));
         sendJson(response, 200, { ids: await writeWorkingIds(body.ids ?? []) });
+      } else if (url.pathname === '/api/changes' && request.method === 'GET') {
+        const since = Number(url.searchParams.get('since') ?? '0') || 0;
+        const [changes, latest] = await Promise.all([readChangesSince(since), latestChangeSeq()]);
+        sendJson(response, 200, { changes, latestSeq: latest });
       } else if (url.pathname === '/api/screenshot-request' && request.method === 'GET') {
         sendJson(response, 200, { request: await readScreenshotRequest() });
       } else if (url.pathname === '/api/screenshot-response' && request.method === 'POST') {

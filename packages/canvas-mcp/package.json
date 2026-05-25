@@ -21,6 +21,7 @@
     "README.md"
   ],
   "scripts": {
+    "prepare": "node bin/build-dist.mjs",
     "pack:dry": "npm pack --dry-run",
     "postinstall": "node bin/canvas-mcp.js setup"
   },
