@@ -43,10 +43,7 @@ function fsExists(filePath) {
 }
 
 function getDataDir() {
-  if (process.env.COGNIBOOM_CANVAS_DATA_DIR) return path.resolve(process.env.COGNIBOOM_CANVAS_DATA_DIR);
-  if (process.platform === 'win32') return path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'CogniboomCanvas');
-  if (process.platform === 'darwin') return path.join(process.env.HOME ?? os.homedir(), 'Library', 'Application Support', 'CogniboomCanvas');
-  return path.join(process.env.XDG_DATA_HOME ?? path.join(process.env.HOME ?? os.homedir(), '.local', 'share'), 'cogniboom-canvas');
+  return path.join(process.cwd(), '.canvas', 'runtime');
 }
 
 function fetchLatestVersion() {
@@ -399,7 +396,7 @@ App health: ${health.ok ? 'healthy' : 'not reachable'}
 HTTP MCP: ${mcp.ok ? 'reachable' : 'not reachable'}
 App URL: ${appUrl}
 MCP URL: ${mcpHttpUrl}
-Data dir override: ${process.env.COGNIBOOM_CANVAS_DATA_DIR ?? '(default)'}
+Canvas dir: ${path.join(process.cwd(), '.canvas')}
 
 ${portAvailable ? `Start HTTP mode with: ${httpCommand}` : 'If this is not Canvas, stop the process using port 3762 or set CANVAS_PORT.'}`);
 }

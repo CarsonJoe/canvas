@@ -6,70 +6,33 @@ import {
   applyPatches,
   appendChange,
   appUrl,
-  appVersion,
   helperVersion,
-  documentPath,
   makeId,
-  mcpHttpUrl,
   now,
   normalizeCanvasObject,
   objectBounds,
   objectParentId,
-  readWorkingIds,
   readDocument,
   shiftObject,
-  summarizeDocument,
   waitForScreenshotResponse,
-  writeDocument,
+  writeAssetSource,
   writeScreenshotRequest,
-  writeWorkingIds,
 } from './canvas-local-core.mjs';
 
-const GUIDES = {
-  'canvas-mcp-instructions': [
-    'Canvas is a live visual collaboration surface. Read the document and selection before editing.',
-    'Prefer incremental object patches over replacing the whole scene.',
-    'Use stable object IDs returned by read tools. Name frames and major objects clearly.',
-    'After meaningful visual changes, call get_screenshot or inspect the open app before continuing.',
-    'Ask before destructive changes that delete many objects or unlink projects.',
-    'Use mark_working and finish_working while editing visible objects or regions.',
-  ].join('\n'),
-  'mermaid-to-canvas': [
-    'Convert Mermaid to native editable canvas objects.',
-    'Use rect, ellipse, text, line, and arrow objects rather than static images.',
-    'Keep layout readable and create diagrams incrementally.',
-  ].join('\n'),
-  'project-preview-workflow': [
-    'Project previews are site frames linked to independent repos.',
-    'Canvas stores project paths and preview URLs only.',
-    'Use annotations on the preview frame as guidance for code edits outside Canvas.',
-  ].join('\n'),
-  'annotation-workflow': [
-    'Treat text, comments, arrows, and strokes with parentId or parentFrameId as annotations.',
-    'Interpret annotation text as intent and arrows/strokes as spatial guidance.',
-  ].join('\n'),
-};
-
-let workingIds = new Set();
+const CONTENT_KINDS = ['html', 'markdown', 'mermaid', 'svg'];
 
 function toolSchema(name, description, inputSchema = { type: 'object', properties: {} }) {
   return { name, description, inputSchema };
 }
 
 export const tools = [
-  toolSchema('canvas.get_guide', 'Return Canvas collaboration instructions for a topic.', {
-    type: 'object',
-    properties: { topic: { type: 'string' } },
-  }),
-  toolSchema('canvas.get_basic_info', 'Return document metadata, object counts, viewport, selection, and linked projects.'),
-  toolSchema('canvas.get_document', 'Return the full current Canvas document.'),
-  toolSchema('canvas.get_selection', 'Return currently selected objects.'),
+  toolSchema('canvas.get_document', 'Return the full current Canvas document, including objects, selectedIds, and viewport. Read this before making edits.'),
   toolSchema('canvas.get_object_info', 'Return one object and its bounds.', {
     type: 'object',
     properties: { objectId: { type: 'string' } },
     required: ['objectId'],
   }),
-  toolSchema('canvas.get_children', 'Return child objects attached to an object.', {
+  toolSchema('canvas.get_children', 'Return objects attached to an object through parentId or parentFrameId. Text, comments, arrows, and strokes attached this way are annotations.', {
     type: 'object',
     properties: { objectId: { type: 'string' } },
     required: ['objectId'],
@@ -78,43 +41,19 @@ export const tools = [
     type: 'object',
     properties: { objectId: { type: 'string' }, depth: { type: 'number' } },
   }),
-  toolSchema('canvas.get_annotations', 'Return normalized annotations attached to a target object.', {
-    type: 'object',
-    properties: { targetId: { type: 'string' } },
-    required: ['targetId'],
-  }),
   toolSchema('canvas.get_screenshot', 'Capture a screenshot through the open local Canvas app.', {
     type: 'object',
     properties: { target: { type: 'object' }, scale: { type: 'number' }, timeoutMs: { type: 'number' } },
   }),
-  toolSchema('canvas.get_linked_projects', 'Return linked project metadata.'),
-  toolSchema('canvas.create_frame', 'Create a plain/image/site frame.', {
-    type: 'object',
-    properties: {
-      x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' },
-      label: { type: 'string' }, kind: { type: 'string' }, background: { type: 'string' }, url: { type: 'string' },
-    },
-    required: ['x', 'y', 'width', 'height'],
-  }),
-  toolSchema('canvas.create_objects', 'Create native canvas objects.', {
+  toolSchema('canvas.create_objects', 'Create native canvas objects. Use frame objects with kind "site" and url for previews. For rich content use frame objects with kind "html", "markdown", "mermaid", or "svg"; when source is provided and flatten is false or omitted, the source is written to .canvas/assets and the frame url is set automatically.', {
     type: 'object',
     properties: { objects: { type: 'array' }, select: { type: 'boolean' } },
     required: ['objects'],
   }),
-  toolSchema('canvas.update_objects', 'Patch existing objects by ID.', {
+  toolSchema('canvas.update_objects', 'Patch existing objects by ID. Use this for text edits, moves, renames, style changes, frame URL changes, and other partial object updates.', {
     type: 'object',
     properties: { updates: { type: 'array' } },
     required: ['updates'],
-  }),
-  toolSchema('canvas.set_text_content', 'Set text on a text or comment object.', {
-    type: 'object',
-    properties: { objectId: { type: 'string' }, text: { type: 'string' } },
-    required: ['objectId', 'text'],
-  }),
-  toolSchema('canvas.move_objects', 'Move objects by delta.', {
-    type: 'object',
-    properties: { ids: { type: 'array', items: { type: 'string' } }, dx: { type: 'number' }, dy: { type: 'number' } },
-    required: ['ids', 'dx', 'dy'],
   }),
   toolSchema('canvas.duplicate_objects', 'Duplicate objects with an offset.', {
     type: 'object',
@@ -126,48 +65,14 @@ export const tools = [
     properties: { ids: { type: 'array', items: { type: 'string' } } },
     required: ['ids'],
   }),
-  toolSchema('canvas.rename_objects', 'Rename frame-like objects by changing labels.', {
-    type: 'object',
-    properties: { items: { type: 'array' } },
-    required: ['items'],
-  }),
-  toolSchema('canvas.apply_patch', 'Apply CanvasPatch operations.', {
+  toolSchema('canvas.apply_patch', 'Apply CanvasPatch operations for batch create, update, delete, selection, or viewport changes.', {
     type: 'object',
     properties: { patch: {} },
     required: ['patch'],
   }),
-  toolSchema('canvas.create_project_preview', 'Create a site preview frame linked to a project.', {
-    type: 'object',
-    properties: { projectId: { type: 'string' }, url: { type: 'string' }, bounds: { type: 'object' } },
-    required: ['projectId', 'url'],
-  }),
-  toolSchema('canvas.link_project', 'Link an independent local project.', {
-    type: 'object',
-    properties: { name: { type: 'string' }, path: { type: 'string' }, repoRoot: { type: 'string' }, previewUrl: { type: 'string' } },
-    required: ['name'],
-  }),
-  toolSchema('canvas.unlink_project', 'Unlink a project by ID.', {
-    type: 'object',
-    properties: { projectId: { type: 'string' } },
-    required: ['projectId'],
-  }),
-  toolSchema('canvas.set_preview_url', 'Set a linked project preview URL.', {
-    type: 'object',
-    properties: { projectId: { type: 'string' }, previewUrl: { type: 'string' } },
-    required: ['projectId'],
-  }),
   toolSchema('canvas.launch', 'Open the Canvas app in the default browser so the user can view your work. Call this when you want the user to see the canvas. Pass focusObjectId to center the view on a specific object.', {
     type: 'object',
     properties: { focusObjectId: { type: 'string' } },
-  }),
-  toolSchema('canvas.mark_working', 'Mark objects as being edited by the agent.', {
-    type: 'object',
-    properties: { ids: { type: 'array', items: { type: 'string' } } },
-    required: ['ids'],
-  }),
-  toolSchema('canvas.finish_working', 'Clear working indicators.', {
-    type: 'object',
-    properties: { ids: { type: 'array', items: { type: 'string' } } },
   }),
 ];
 
@@ -187,29 +92,8 @@ export async function callTool(name, args = {}, context = {}) {
   const transport = context.transport ?? 'stdio';
 
   switch (name) {
-    case 'canvas.get_guide':
-      return content({
-        topic: args.topic ?? 'canvas-mcp-instructions',
-        guide: GUIDES[args.topic] ?? GUIDES['canvas-mcp-instructions'],
-        availableTopics: Object.keys(GUIDES),
-      });
-    case 'canvas.get_basic_info':
-      workingIds = new Set(await readWorkingIds());
-      return content({
-        ...summarizeDocument(document),
-        appUrl,
-        mcpHttpUrl,
-        helperVersion,
-        appVersion,
-        transport,
-        documentPath,
-        screenshotBridge: 'waiting',
-        workingIds: [...workingIds],
-      });
     case 'canvas.get_document':
-      return content(document);
-    case 'canvas.get_selection':
-      return content(document.selectedIds.map((id) => document.objects.find((object) => object.id === id)).filter(Boolean));
+      return content({ ...document, appUrl, transport });
     case 'canvas.get_object_info': {
       const object = document.objects.find((item) => item.id === args.objectId);
       return content(object ? { object, bounds: objectBounds(object) } : null);
@@ -232,18 +116,6 @@ export async function callTool(name, args = {}, context = {}) {
       });
       return content(roots.map((object) => summarize(object, 0)));
     }
-    case 'canvas.get_annotations': {
-      const target = document.objects.find((object) => object.id === args.targetId);
-      const annotations = document.objects
-        .filter((object) => objectParentId(object) === args.targetId)
-        .filter((object) => ['text', 'comment', 'arrow', 'stroke'].includes(object.type))
-        .map((object) => {
-          if (object.type === 'text' || object.type === 'comment') return { id: object.id, type: object.type, text: object.text, bounds: objectBounds(object) };
-          if (object.type === 'arrow') return { id: object.id, type: 'arrow', from: { x: object.x1, y: object.y1 }, to: { x: object.x2, y: object.y2 } };
-          return { id: object.id, type: 'stroke', bounds: objectBounds(object), points: object.points };
-        });
-      return content({ target: target ? { id: target.id, type: target.type, url: target.url } : null, annotations });
-    }
     case 'canvas.get_screenshot':
       {
         const request = {
@@ -263,8 +135,6 @@ export async function callTool(name, args = {}, context = {}) {
           imageData: response.imageData,
         });
       }
-    case 'canvas.get_linked_projects':
-      return content(document.links ?? []);
     case 'canvas.launch': {
       const focusId = args.focusObjectId ?? null;
       if (process.env.CANVAS_NO_OPEN !== '1') {
@@ -278,48 +148,26 @@ export async function callTool(name, args = {}, context = {}) {
       }
       return content({ app_url: appUrl, opened: process.env.CANVAS_NO_OPEN !== '1', focusObjectId: focusId });
     }
-    case 'canvas.create_frame': {
-      const frame = {
-        id: args.id ?? makeId('frame'),
-        type: 'frame',
-        kind: args.kind ?? 'plain',
-        x: args.x,
-        y: args.y,
-        width: args.width,
-        height: args.height,
-        label: args.label ?? 'Frame',
-        background: args.background ?? (args.kind === 'site' ? '#ffffff' : '#181818'),
-        url: args.url ?? null,
-        imageData: args.imageData ?? null,
-        generating: false,
-        priorBounds: null,
-      };
-      await applyPatches({ op: 'create', objects: [frame], select: true });
-      await appendChange({ author: 'llm', op: 'create_frame', objectIds: [frame.id], focusId: frame.id }).catch(() => {});
-      return content({ ...frame, view_url: appUrl });
-    }
     case 'canvas.create_objects': {
       const objects = (args.objects ?? []).map(normalizeCanvasObject).filter(Boolean);
+      const assets = [];
+      for (const obj of objects) {
+        if (obj.type === 'frame' && CONTENT_KINDS.includes(obj.kind) && obj.source && !obj.flatten) {
+          const format = obj.kind === 'html' ? 'html' : obj.kind === 'svg' ? 'svg' : 'markdown';
+          const filePath = await writeAssetSource(obj.id, obj.source, format);
+          const ext = format === 'html' ? 'html' : format === 'svg' ? 'svg' : 'md';
+          obj.url = `${appUrl}/assets/${obj.id}`;
+          assets.push({ id: obj.id, url: obj.url, edit_file: `.canvas/assets/${obj.id}.${ext}`, filePath });
+        }
+      }
       await applyPatches({ op: 'create', objects, select: args.select ?? true });
       await appendChange({ author: 'llm', op: 'create_objects', objectIds: objects.map((o) => o.id), focusId: objects[0]?.id ?? null }).catch(() => {});
-      return content({ createdIds: objects.map((o) => o.id), objects, view_url: appUrl });
+      return content({ createdIds: objects.map((o) => o.id), objects, view_url: appUrl, ...(assets.length ? { assets } : {}) });
     }
     case 'canvas.update_objects':
       await applyPatches(args.updates.map((item) => ({ op: 'update', id: item.id, changes: item.changes })));
       await appendChange({ author: 'llm', op: 'update_objects', objectIds: args.updates.map((item) => item.id), focusId: args.updates[0]?.id ?? null }).catch(() => {});
       return content({ updatedIds: args.updates.map((item) => item.id), view_url: appUrl });
-    case 'canvas.set_text_content':
-      await applyPatches({ op: 'update', id: args.objectId, changes: { text: args.text } });
-      await appendChange({ author: 'llm', op: 'set_text', objectIds: [args.objectId], focusId: args.objectId }).catch(() => {});
-      return content({ id: args.objectId, text: args.text, view_url: appUrl });
-    case 'canvas.move_objects': {
-      const patches = document.objects
-        .filter((object) => args.ids.includes(object.id))
-        .map((object) => ({ op: 'update', id: object.id, changes: shiftObject(object, args.dx, args.dy) }));
-      await applyPatches(patches);
-      await appendChange({ author: 'llm', op: 'move_objects', objectIds: args.ids, focusId: args.ids[0] ?? null }).catch(() => {});
-      return content({ movedIds: patches.map((patch) => patch.id), dx: args.dx, dy: args.dy, view_url: appUrl });
-    }
     case 'canvas.duplicate_objects': {
       const offset = args.offset ?? { x: 24, y: 24 };
       const clones = document.objects
@@ -333,74 +181,10 @@ export async function callTool(name, args = {}, context = {}) {
       await applyPatches({ op: 'delete', ids: args.ids });
       await appendChange({ author: 'llm', op: 'delete_objects', objectIds: args.ids, focusId: null }).catch(() => {});
       return content({ deletedIds: args.ids, view_url: appUrl });
-    case 'canvas.rename_objects':
-      await applyPatches(args.items.map((item) => ({ op: 'update', id: item.id, changes: { label: item.name } })));
-      await appendChange({ author: 'llm', op: 'rename_objects', objectIds: args.items.map((i) => i.id), focusId: args.items[0]?.id ?? null }).catch(() => {});
-      return content({ renamedIds: args.items.map((item) => item.id), view_url: appUrl });
     case 'canvas.apply_patch':
       await applyPatches(args.patch);
       await appendChange({ author: 'llm', op: 'apply_patch', objectIds: [], focusId: null }).catch(() => {});
       return content({ ok: true, view_url: appUrl });
-    case 'canvas.create_project_preview': {
-      const link = document.links?.find((item) => item.id === args.projectId);
-      const bounds = args.bounds ?? { x: 0, y: 0, width: 1024, height: 768 };
-      const frame = {
-        id: makeId('frame'),
-        type: 'frame',
-        kind: 'site',
-        x: bounds.x,
-        y: bounds.y,
-        width: bounds.width,
-        height: bounds.height,
-        label: link?.name ? `${link.name} preview` : 'Project preview',
-        background: '#ffffff',
-        url: args.url,
-        imageData: null,
-        generating: false,
-        priorBounds: null,
-      };
-      const links = (document.links ?? []).map((item) => item.id === args.projectId ? { ...item, previewUrl: args.url } : item);
-      await writeDocument({ ...document, objects: [...document.objects, frame], selectedIds: [frame.id], links, updatedAt: now() });
-      await appendChange({ author: 'llm', op: 'create_frame', objectIds: [frame.id], focusId: frame.id }).catch(() => {});
-      return content({ ...frame, view_url: appUrl });
-    }
-    case 'canvas.link_project': {
-      const link = {
-        id: args.id ?? makeId('proj'),
-        kind: 'local-project',
-        name: args.name,
-        path: args.path,
-        repoRoot: args.repoRoot,
-        previewUrl: args.previewUrl,
-        createdAt: now(),
-      };
-      await writeDocument({ ...document, links: [...(document.links ?? []).filter((item) => item.id !== link.id), link], updatedAt: now() });
-      return content(link);
-    }
-    case 'canvas.unlink_project':
-      await writeDocument({ ...document, links: (document.links ?? []).filter((link) => link.id !== args.projectId), updatedAt: now() });
-      return content({ unlinkedId: args.projectId });
-    case 'canvas.set_preview_url':
-      await writeDocument({
-        ...document,
-        links: (document.links ?? []).map((link) => link.id === args.projectId ? { ...link, previewUrl: args.previewUrl } : link),
-        updatedAt: now(),
-      });
-      return content({ projectId: args.projectId, previewUrl: args.previewUrl });
-    case 'canvas.mark_working':
-      workingIds = new Set(await readWorkingIds());
-      for (const id of args.ids ?? []) workingIds.add(id);
-      await writeWorkingIds([...workingIds]);
-      return content({ workingIds: [...workingIds] });
-    case 'canvas.finish_working':
-      workingIds = new Set(await readWorkingIds());
-      if (Array.isArray(args.ids)) {
-        for (const id of args.ids) workingIds.delete(id);
-      } else {
-        workingIds.clear();
-      }
-      await writeWorkingIds([...workingIds]);
-      return content({ workingIds: [...workingIds] });
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
