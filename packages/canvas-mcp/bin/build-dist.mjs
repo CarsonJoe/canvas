@@ -8,8 +8,6 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const repoRoot = path.resolve(packageRoot, '..', '..');
 const dist = path.join(packageRoot, 'dist');
 
-if (fs.existsSync(dist)) process.exit(0);
-
 const repoPackageJsonPath = path.join(repoRoot, 'package.json');
 try {
   const pkg = JSON.parse(fs.readFileSync(repoPackageJsonPath, 'utf8'));
