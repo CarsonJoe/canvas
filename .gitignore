@@ -3,7 +3,7 @@
 !.env.example
 node_modules/
 dist/
-.canvas-local/
+.canvas/runtime/
 .claude/settings.local.json
 canvas-local*.log
 *.tgz

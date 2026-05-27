@@ -5,71 +5,166 @@ import { fileURLToPath } from 'node:url';
 import {
   applyPatches,
   appendChange,
+  appHost,
+  appPort,
   appUrl,
-  appVersion,
-  helperVersion,
   documentPath,
+  helperVersion,
   makeId,
-  mcpHttpUrl,
   now,
   normalizeCanvasObject,
   objectBounds,
   objectParentId,
-  readWorkingIds,
   readDocument,
+  setAppPort,
   shiftObject,
-  summarizeDocument,
   waitForScreenshotResponse,
-  writeDocument,
+  writeAssetSource,
   writeScreenshotRequest,
-  writeWorkingIds,
 } from './canvas-local-core.mjs';
 
-const GUIDES = {
-  'canvas-mcp-instructions': [
-    'Canvas is a live visual collaboration surface. Read the document and selection before editing.',
-    'Prefer incremental object patches over replacing the whole scene.',
-    'Use stable object IDs returned by read tools. Name frames and major objects clearly.',
-    'After meaningful visual changes, call get_screenshot or inspect the open app before continuing.',
-    'Ask before destructive changes that delete many objects or unlink projects.',
-    'Use mark_working and finish_working while editing visible objects or regions.',
-  ].join('\n'),
-  'mermaid-to-canvas': [
-    'Convert Mermaid to native editable canvas objects.',
-    'Use rect, ellipse, text, line, and arrow objects rather than static images.',
-    'Keep layout readable and create diagrams incrementally.',
-  ].join('\n'),
-  'project-preview-workflow': [
-    'Project previews are site frames linked to independent repos.',
-    'Canvas stores project paths and preview URLs only.',
-    'Use annotations on the preview frame as guidance for code edits outside Canvas.',
-  ].join('\n'),
-  'annotation-workflow': [
-    'Treat text, comments, arrows, and strokes with parentId or parentFrameId as annotations.',
-    'Interpret annotation text as intent and arrows/strokes as spatial guidance.',
-  ].join('\n'),
-};
+const CONTENT_KINDS = ['html', 'markdown', 'mermaid', 'svg'];
 
-let workingIds = new Set();
+const CANVAS_GUIDE = `# Canvas MCP Usage Guide
+
+## Object Schemas
+
+### frame
+{ type:"frame", x, y, width, height, label, kind:"plain"|"site"|"html"|"markdown"|"mermaid"|"svg",
+  url (required for kind "site"; auto-set for html/markdown/mermaid/svg when source is provided),
+  source (string content for html/markdown/mermaid/svg kinds),
+  background }
+
+### rect
+{ type:"rect", x, y, width, height, fill, stroke, strokeWidth, cornerRadius }
+
+### ellipse
+Position is the CENTER point, not top-left.
+{ type:"ellipse", x, y, radiusX, radiusY, fill, stroke, strokeWidth }
+Bounds = { x: x-radiusX, y: y-radiusY, width: radiusX*2, height: radiusY*2 }
+
+### text
+{ type:"text", x, y, text, fontSize, color, fontFamily, parentFrameId? }
+
+### comment
+{ type:"comment", x, y, text, parentFrameId? }
+
+### line
+{ type:"line", x1, y1, x2, y2, stroke, strokeWidth }
+
+### arrow
+{ type:"arrow", x1, y1, x2, y2, stroke, strokeWidth, cx?, cy? }
+cx/cy are an optional curve control point.
+
+### stroke (freehand)
+{ type:"stroke", points:[x0,y0,x1,y1,...] }
+points is a FLAT alternating x,y number array, NOT an array of [x,y] pairs.
+
+---
+
+## canvas.create_objects
+- objects: array of plain object definitions — each must be a JS object with a type field, NOT a JSON string.
+- Objects are automatically assigned an id if you omit one.
+
+## canvas.update_objects
+- updates: [{ id:"object-id", changes:{ ...fieldsToChange } }, ...]
+- Only the fields in changes are merged; other fields are preserved.
+- Passing an item without changes or with a null id produces updatedIds:[null] and changes nothing.
+- Example: [{ id:"frame_abc123", changes:{ label:"New title", x:200 } }]
+
+## canvas.apply_patch
+- patch: a single operation OR an array of operations.
+- Unknown op values are silently ignored and return { ok:true } — validate your op field.
+
+Supported ops:
+  { op:"create",   objects:[...], select:true|false }
+  { op:"update",   id:"object-id", changes:{...} }
+  { op:"delete",   ids:["id1","id2"] }
+  { op:"select",   ids:["id1"] }
+  { op:"viewport", x:number, y:number, scale:number }
+
+WRONG shapes that silently do nothing:
+  { ops:[...] }       ← wrong key (should be op, not ops)
+  [{"op":"add",...}]  ← JSON Patch style — not supported
+  { create:[...] }    ← missing op key
+
+---
+
+## canvas.get_screenshot
+target is required to have a type field — passing raw coordinates without it throws "Screenshot target not found."
+  { type: "viewport" }                              — capture what's visible (default)
+  { type: "bounds", x, y, width, height }           — canvas coordinate region
+  { type: "object", objectId: "frame_abc" }         — bounding box of one object
+  { type: "selection" }                             — bounding box of current selection
+
+---
+
+## Workspace URL
+All tool calls read/write this workspace's .canvas/canvas.json.
+The app URL for this workspace is embedded in every tool response as view_url.
+If view_url differs from what you expect, call canvas.get_document to confirm
+which document is active.
+`;
+
+async function probeCanvasHealth(url) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch(`${url}/api/health`, { signal: controller.signal });
+    clearTimeout(timer);
+    if (response.ok) return await response.json();
+  } catch {
+    clearTimeout(timer);
+  }
+  return null;
+}
+
+async function resolveAppPort() {
+  const health = await probeCanvasHealth(appUrl);
+  if (!health) return; // Port is free — bind normally
+
+  if (health.documentPath === documentPath) return; // Same workspace on this port — reuse it
+
+  // A different workspace owns our preferred port. Find a free port or a port already
+  // serving this workspace.
+  process.stderr.write(
+    `[canvas] Port ${appPort} is in use by a different workspace (${health.documentPath}).\n` +
+    `[canvas] Scanning for a free port...\n`,
+  );
+  const base = appPort;
+  for (let p = base + 1; p <= base + 50; p++) {
+    const h = await probeCanvasHealth(`http://${appHost}:${p}`);
+    if (h?.documentPath === documentPath) {
+      // Found an existing server for this workspace on a different port
+      process.stderr.write(`[canvas] Found existing server for this workspace on port ${p}.\n`);
+      setAppPort(p);
+      return;
+    }
+    if (!h) {
+      process.stderr.write(`[canvas] Using port ${p} for this workspace.\n`);
+      setAppPort(p);
+      return;
+    }
+  }
+  process.stderr.write(
+    `[canvas] Warning: Could not find a free port in range ${base + 1}–${base + 50}.\n` +
+    `[canvas] The browser may show a different workspace than the MCP is editing.\n`,
+  );
+}
 
 function toolSchema(name, description, inputSchema = { type: 'object', properties: {} }) {
   return { name, description, inputSchema };
 }
 
 export const tools = [
-  toolSchema('canvas.get_guide', 'Return Canvas collaboration instructions for a topic.', {
-    type: 'object',
-    properties: { topic: { type: 'string' } },
-  }),
-  toolSchema('canvas.get_basic_info', 'Return document metadata, object counts, viewport, selection, and linked projects.'),
-  toolSchema('canvas.get_document', 'Return the full current Canvas document.'),
-  toolSchema('canvas.get_selection', 'Return currently selected objects.'),
+  toolSchema('canvas.get_guide', 'Return the Canvas MCP usage guide: all object schemas, patch operation shapes, and examples. Call this first if you are unsure about expected data shapes.'),
+  toolSchema('canvas.get_document', 'Return the full current Canvas document, including objects, selectedIds, and viewport. Read this before making edits.'),
   toolSchema('canvas.get_object_info', 'Return one object and its bounds.', {
     type: 'object',
     properties: { objectId: { type: 'string' } },
     required: ['objectId'],
   }),
-  toolSchema('canvas.get_children', 'Return child objects attached to an object.', {
+  toolSchema('canvas.get_children', 'Return objects attached to an object through parentId or parentFrameId. Text, comments, arrows, and strokes attached this way are annotations.', {
     type: 'object',
     properties: { objectId: { type: 'string' } },
     required: ['objectId'],
@@ -78,43 +173,28 @@ export const tools = [
     type: 'object',
     properties: { objectId: { type: 'string' }, depth: { type: 'number' } },
   }),
-  toolSchema('canvas.get_annotations', 'Return normalized annotations attached to a target object.', {
-    type: 'object',
-    properties: { targetId: { type: 'string' } },
-    required: ['targetId'],
-  }),
-  toolSchema('canvas.get_screenshot', 'Capture a screenshot through the open local Canvas app.', {
+  toolSchema('canvas.get_screenshot', 'Capture a screenshot through the open local Canvas app. target shapes: { type:"viewport" } (default), { type:"bounds", x, y, width, height } (canvas coordinates), { type:"object", objectId:"..." }, { type:"selection" }.', {
     type: 'object',
     properties: { target: { type: 'object' }, scale: { type: 'number' }, timeoutMs: { type: 'number' } },
   }),
-  toolSchema('canvas.get_linked_projects', 'Return linked project metadata.'),
-  toolSchema('canvas.create_frame', 'Create a plain/image/site frame.', {
+  toolSchema('canvas.create_objects', 'Create native canvas objects. objects must be an array of plain object definitions (not strings), each with a type field. Supported types: frame, rect, ellipse, text, comment, line, arrow, stroke. For site previews use frame with kind "site" and url. For rich content use frame with kind "html", "markdown", "mermaid", or "svg" and set source to the content string. Call canvas.get_guide for full schema reference.', {
     type: 'object',
-    properties: {
-      x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' },
-      label: { type: 'string' }, kind: { type: 'string' }, background: { type: 'string' }, url: { type: 'string' },
-    },
-    required: ['x', 'y', 'width', 'height'],
-  }),
-  toolSchema('canvas.create_objects', 'Create native canvas objects.', {
-    type: 'object',
-    properties: { objects: { type: 'array' }, select: { type: 'boolean' } },
+    properties: { objects: { type: 'array', items: { type: 'object' } }, select: { type: 'boolean' } },
     required: ['objects'],
   }),
-  toolSchema('canvas.update_objects', 'Patch existing objects by ID.', {
+  toolSchema('canvas.update_objects', 'Patch existing objects by ID. Each entry in updates must be { id: "object-id", changes: { ...fieldsToUpdate } }. Example: [{ id: "frame_abc", changes: { label: "New label", x: 100 } }]. Do NOT pass the whole object — only the fields that should change.', {
     type: 'object',
-    properties: { updates: { type: 'array' } },
+    properties: {
+      updates: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: { id: { type: 'string' }, changes: { type: 'object' } },
+          required: ['id', 'changes'],
+        },
+      },
+    },
     required: ['updates'],
-  }),
-  toolSchema('canvas.set_text_content', 'Set text on a text or comment object.', {
-    type: 'object',
-    properties: { objectId: { type: 'string' }, text: { type: 'string' } },
-    required: ['objectId', 'text'],
-  }),
-  toolSchema('canvas.move_objects', 'Move objects by delta.', {
-    type: 'object',
-    properties: { ids: { type: 'array', items: { type: 'string' } }, dx: { type: 'number' }, dy: { type: 'number' } },
-    required: ['ids', 'dx', 'dy'],
   }),
   toolSchema('canvas.duplicate_objects', 'Duplicate objects with an offset.', {
     type: 'object',
@@ -126,48 +206,14 @@ export const tools = [
     properties: { ids: { type: 'array', items: { type: 'string' } } },
     required: ['ids'],
   }),
-  toolSchema('canvas.rename_objects', 'Rename frame-like objects by changing labels.', {
-    type: 'object',
-    properties: { items: { type: 'array' } },
-    required: ['items'],
-  }),
-  toolSchema('canvas.apply_patch', 'Apply CanvasPatch operations.', {
+  toolSchema('canvas.apply_patch', 'Apply one or more CanvasPatch operations. patch can be a single operation object or an array of operations. Each operation must have an op field. Supported ops: { op: "create", objects: [...], select: bool } — creates objects; { op: "update", id: "object-id", changes: {...} } — merges changes into one object; { op: "delete", ids: [...] } — removes objects; { op: "select", ids: [...] } — sets selection; { op: "viewport", x, y, scale } — moves the viewport. Wrong op shapes are silently ignored.', {
     type: 'object',
     properties: { patch: {} },
     required: ['patch'],
   }),
-  toolSchema('canvas.create_project_preview', 'Create a site preview frame linked to a project.', {
-    type: 'object',
-    properties: { projectId: { type: 'string' }, url: { type: 'string' }, bounds: { type: 'object' } },
-    required: ['projectId', 'url'],
-  }),
-  toolSchema('canvas.link_project', 'Link an independent local project.', {
-    type: 'object',
-    properties: { name: { type: 'string' }, path: { type: 'string' }, repoRoot: { type: 'string' }, previewUrl: { type: 'string' } },
-    required: ['name'],
-  }),
-  toolSchema('canvas.unlink_project', 'Unlink a project by ID.', {
-    type: 'object',
-    properties: { projectId: { type: 'string' } },
-    required: ['projectId'],
-  }),
-  toolSchema('canvas.set_preview_url', 'Set a linked project preview URL.', {
-    type: 'object',
-    properties: { projectId: { type: 'string' }, previewUrl: { type: 'string' } },
-    required: ['projectId'],
-  }),
   toolSchema('canvas.launch', 'Open the Canvas app in the default browser so the user can view your work. Call this when you want the user to see the canvas. Pass focusObjectId to center the view on a specific object.', {
     type: 'object',
     properties: { focusObjectId: { type: 'string' } },
-  }),
-  toolSchema('canvas.mark_working', 'Mark objects as being edited by the agent.', {
-    type: 'object',
-    properties: { ids: { type: 'array', items: { type: 'string' } } },
-    required: ['ids'],
-  }),
-  toolSchema('canvas.finish_working', 'Clear working indicators.', {
-    type: 'object',
-    properties: { ids: { type: 'array', items: { type: 'string' } } },
   }),
 ];
 
@@ -188,28 +234,9 @@ export async function callTool(name, args = {}, context = {}) {
 
   switch (name) {
     case 'canvas.get_guide':
-      return content({
-        topic: args.topic ?? 'canvas-mcp-instructions',
-        guide: GUIDES[args.topic] ?? GUIDES['canvas-mcp-instructions'],
-        availableTopics: Object.keys(GUIDES),
-      });
-    case 'canvas.get_basic_info':
-      workingIds = new Set(await readWorkingIds());
-      return content({
-        ...summarizeDocument(document),
-        appUrl,
-        mcpHttpUrl,
-        helperVersion,
-        appVersion,
-        transport,
-        documentPath,
-        screenshotBridge: 'waiting',
-        workingIds: [...workingIds],
-      });
+      return content(CANVAS_GUIDE);
     case 'canvas.get_document':
-      return content(document);
-    case 'canvas.get_selection':
-      return content(document.selectedIds.map((id) => document.objects.find((object) => object.id === id)).filter(Boolean));
+      return content({ ...document, appUrl, transport });
     case 'canvas.get_object_info': {
       const object = document.objects.find((item) => item.id === args.objectId);
       return content(object ? { object, bounds: objectBounds(object) } : null);
@@ -232,18 +259,6 @@ export async function callTool(name, args = {}, context = {}) {
       });
       return content(roots.map((object) => summarize(object, 0)));
     }
-    case 'canvas.get_annotations': {
-      const target = document.objects.find((object) => object.id === args.targetId);
-      const annotations = document.objects
-        .filter((object) => objectParentId(object) === args.targetId)
-        .filter((object) => ['text', 'comment', 'arrow', 'stroke'].includes(object.type))
-        .map((object) => {
-          if (object.type === 'text' || object.type === 'comment') return { id: object.id, type: object.type, text: object.text, bounds: objectBounds(object) };
-          if (object.type === 'arrow') return { id: object.id, type: 'arrow', from: { x: object.x1, y: object.y1 }, to: { x: object.x2, y: object.y2 } };
-          return { id: object.id, type: 'stroke', bounds: objectBounds(object), points: object.points };
-        });
-      return content({ target: target ? { id: target.id, type: target.type, url: target.url } : null, annotations });
-    }
     case 'canvas.get_screenshot':
       {
         const request = {
@@ -263,8 +278,6 @@ export async function callTool(name, args = {}, context = {}) {
           imageData: response.imageData,
         });
       }
-    case 'canvas.get_linked_projects':
-      return content(document.links ?? []);
     case 'canvas.launch': {
       const focusId = args.focusObjectId ?? null;
       if (process.env.CANVAS_NO_OPEN !== '1') {
@@ -278,48 +291,26 @@ export async function callTool(name, args = {}, context = {}) {
       }
       return content({ app_url: appUrl, opened: process.env.CANVAS_NO_OPEN !== '1', focusObjectId: focusId });
     }
-    case 'canvas.create_frame': {
-      const frame = {
-        id: args.id ?? makeId('frame'),
-        type: 'frame',
-        kind: args.kind ?? 'plain',
-        x: args.x,
-        y: args.y,
-        width: args.width,
-        height: args.height,
-        label: args.label ?? 'Frame',
-        background: args.background ?? (args.kind === 'site' ? '#ffffff' : '#181818'),
-        url: args.url ?? null,
-        imageData: args.imageData ?? null,
-        generating: false,
-        priorBounds: null,
-      };
-      await applyPatches({ op: 'create', objects: [frame], select: true });
-      await appendChange({ author: 'llm', op: 'create_frame', objectIds: [frame.id], focusId: frame.id }).catch(() => {});
-      return content({ ...frame, view_url: appUrl });
-    }
     case 'canvas.create_objects': {
       const objects = (args.objects ?? []).map(normalizeCanvasObject).filter(Boolean);
+      const assets = [];
+      for (const obj of objects) {
+        if (obj.type === 'frame' && CONTENT_KINDS.includes(obj.kind) && obj.source && !obj.flatten) {
+          const format = obj.kind === 'html' ? 'html' : obj.kind === 'svg' ? 'svg' : 'markdown';
+          const filePath = await writeAssetSource(obj.id, obj.source, format);
+          const ext = format === 'html' ? 'html' : format === 'svg' ? 'svg' : 'md';
+          obj.url = `${appUrl}/assets/${obj.id}`;
+          assets.push({ id: obj.id, url: obj.url, edit_file: `.canvas/assets/${obj.id}.${ext}`, filePath });
+        }
+      }
       await applyPatches({ op: 'create', objects, select: args.select ?? true });
       await appendChange({ author: 'llm', op: 'create_objects', objectIds: objects.map((o) => o.id), focusId: objects[0]?.id ?? null }).catch(() => {});
-      return content({ createdIds: objects.map((o) => o.id), objects, view_url: appUrl });
+      return content({ createdIds: objects.map((o) => o.id), objects, view_url: appUrl, ...(assets.length ? { assets } : {}) });
     }
     case 'canvas.update_objects':
       await applyPatches(args.updates.map((item) => ({ op: 'update', id: item.id, changes: item.changes })));
       await appendChange({ author: 'llm', op: 'update_objects', objectIds: args.updates.map((item) => item.id), focusId: args.updates[0]?.id ?? null }).catch(() => {});
       return content({ updatedIds: args.updates.map((item) => item.id), view_url: appUrl });
-    case 'canvas.set_text_content':
-      await applyPatches({ op: 'update', id: args.objectId, changes: { text: args.text } });
-      await appendChange({ author: 'llm', op: 'set_text', objectIds: [args.objectId], focusId: args.objectId }).catch(() => {});
-      return content({ id: args.objectId, text: args.text, view_url: appUrl });
-    case 'canvas.move_objects': {
-      const patches = document.objects
-        .filter((object) => args.ids.includes(object.id))
-        .map((object) => ({ op: 'update', id: object.id, changes: shiftObject(object, args.dx, args.dy) }));
-      await applyPatches(patches);
-      await appendChange({ author: 'llm', op: 'move_objects', objectIds: args.ids, focusId: args.ids[0] ?? null }).catch(() => {});
-      return content({ movedIds: patches.map((patch) => patch.id), dx: args.dx, dy: args.dy, view_url: appUrl });
-    }
     case 'canvas.duplicate_objects': {
       const offset = args.offset ?? { x: 24, y: 24 };
       const clones = document.objects
@@ -333,74 +324,10 @@ export async function callTool(name, args = {}, context = {}) {
       await applyPatches({ op: 'delete', ids: args.ids });
       await appendChange({ author: 'llm', op: 'delete_objects', objectIds: args.ids, focusId: null }).catch(() => {});
       return content({ deletedIds: args.ids, view_url: appUrl });
-    case 'canvas.rename_objects':
-      await applyPatches(args.items.map((item) => ({ op: 'update', id: item.id, changes: { label: item.name } })));
-      await appendChange({ author: 'llm', op: 'rename_objects', objectIds: args.items.map((i) => i.id), focusId: args.items[0]?.id ?? null }).catch(() => {});
-      return content({ renamedIds: args.items.map((item) => item.id), view_url: appUrl });
     case 'canvas.apply_patch':
       await applyPatches(args.patch);
       await appendChange({ author: 'llm', op: 'apply_patch', objectIds: [], focusId: null }).catch(() => {});
       return content({ ok: true, view_url: appUrl });
-    case 'canvas.create_project_preview': {
-      const link = document.links?.find((item) => item.id === args.projectId);
-      const bounds = args.bounds ?? { x: 0, y: 0, width: 1024, height: 768 };
-      const frame = {
-        id: makeId('frame'),
-        type: 'frame',
-        kind: 'site',
-        x: bounds.x,
-        y: bounds.y,
-        width: bounds.width,
-        height: bounds.height,
-        label: link?.name ? `${link.name} preview` : 'Project preview',
-        background: '#ffffff',
-        url: args.url,
-        imageData: null,
-        generating: false,
-        priorBounds: null,
-      };
-      const links = (document.links ?? []).map((item) => item.id === args.projectId ? { ...item, previewUrl: args.url } : item);
-      await writeDocument({ ...document, objects: [...document.objects, frame], selectedIds: [frame.id], links, updatedAt: now() });
-      await appendChange({ author: 'llm', op: 'create_frame', objectIds: [frame.id], focusId: frame.id }).catch(() => {});
-      return content({ ...frame, view_url: appUrl });
-    }
-    case 'canvas.link_project': {
-      const link = {
-        id: args.id ?? makeId('proj'),
-        kind: 'local-project',
-        name: args.name,
-        path: args.path,
-        repoRoot: args.repoRoot,
-        previewUrl: args.previewUrl,
-        createdAt: now(),
-      };
-      await writeDocument({ ...document, links: [...(document.links ?? []).filter((item) => item.id !== link.id), link], updatedAt: now() });
-      return content(link);
-    }
-    case 'canvas.unlink_project':
-      await writeDocument({ ...document, links: (document.links ?? []).filter((link) => link.id !== args.projectId), updatedAt: now() });
-      return content({ unlinkedId: args.projectId });
-    case 'canvas.set_preview_url':
-      await writeDocument({
-        ...document,
-        links: (document.links ?? []).map((link) => link.id === args.projectId ? { ...link, previewUrl: args.previewUrl } : link),
-        updatedAt: now(),
-      });
-      return content({ projectId: args.projectId, previewUrl: args.previewUrl });
-    case 'canvas.mark_working':
-      workingIds = new Set(await readWorkingIds());
-      for (const id of args.ids ?? []) workingIds.add(id);
-      await writeWorkingIds([...workingIds]);
-      return content({ workingIds: [...workingIds] });
-    case 'canvas.finish_working':
-      workingIds = new Set(await readWorkingIds());
-      if (Array.isArray(args.ids)) {
-        for (const id of args.ids) workingIds.delete(id);
-      } else {
-        workingIds.clear();
-      }
-      await writeWorkingIds([...workingIds]);
-      return content({ workingIds: [...workingIds] });
     default:
       throw new Error(`Unknown tool: ${name}`);
   }
@@ -448,12 +375,19 @@ async function handleStdioMessage(message) {
 }
 
 export async function startStdioMcpServer({ startApp = true, open = true } = {}) {
+  if (startApp) await resolveAppPort();
+
   const appServerModule = startApp ? await import('./canvas-app-server.mjs') : null;
   const server = appServerModule ? appServerModule.createCanvasAppServer() : null;
   if (server) {
     server.on('error', (error) => {
       if (error && error.code === 'EADDRINUSE') {
-        if (open) appServerModule.openBrowser(appUrl);
+        // Port was free during resolveAppPort but got taken before bind (race condition).
+        process.stderr.write(
+          `[canvas] Error: port ${appPort} was taken by the time we tried to bind.\n` +
+          `[canvas] The MCP server will continue but the browser app could not be started.\n` +
+          `[canvas] Stop other Canvas servers and restart this MCP server.\n`,
+        );
         return;
       }
       throw error;

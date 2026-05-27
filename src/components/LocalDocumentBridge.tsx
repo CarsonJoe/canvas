@@ -43,13 +43,6 @@ async function fetchChanges(since: number): Promise<{ changes: ChangeEntry[]; la
   }
 }
 
-async function fetchWorkingIds(): Promise<string[]> {
-  const response = await fetch('/api/working', { cache: 'no-store' });
-  if (!response.ok) return [];
-  const body = await response.json();
-  return Array.isArray(body.ids) ? body.ids : [];
-}
-
 interface ScreenshotRequest {
   id: string;
   target?: Parameters<NonNullable<ReturnType<typeof useCanvasStore.getState>['captureScreenshot']>>[0];
@@ -78,8 +71,6 @@ async function postScreenshotResponse(responseBody: {
 
 export default function LocalDocumentBridge() {
   const importDocument = useCanvasStore((state) => state.importDocument);
-  const markWorking = useCanvasStore((state) => state.markWorking);
-  const finishWorking = useCanvasStore((state) => state.finishWorking);
   const addPendingLlmChanges = useCanvasStore((state) => state.addPendingLlmChanges);
   const setPendingFocusCenter = useCanvasStore((state) => state.setPendingFocusCenter);
   const lastRemoteUpdatedAtRef = useRef<string | null>(null);
@@ -88,38 +79,57 @@ export default function LocalDocumentBridge() {
   const applyingRemoteRef = useRef(false);
   const lastSeenSeqRef = useRef<number | null>(null);
 
+  // Two-phase init: both IDB hydration and server fetch must complete before
+  // any outbound postDocument calls are allowed. Server document wins.
+  const idbReadyRef = useRef(false);
+  const serverDocRef = useRef<CanvasDocument | null>(null);
+  const initDoneRef = useRef(false);
+  const importDocRef = useRef(importDocument);
+  importDocRef.current = importDocument;
+
+  function tryCompleteInit() {
+    if (initDoneRef.current || !idbReadyRef.current || serverDocRef.current === null) return;
+    initDoneRef.current = true;
+    const doc = serverDocRef.current;
+    applyingRemoteRef.current = true;
+    importDocRef.current(doc);
+    lastRemoteUpdatedAtRef.current = doc.updatedAt;
+    lastPostedUpdatedAtRef.current = doc.updatedAt;
+    window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
+  }
+
+  // Phase 1: fetch server document.
   useEffect(() => {
     if (!isLocalServer()) return;
     let cancelled = false;
-
     fetchDocument()
-      .then((document) => {
-        if (!document || cancelled) return;
-        applyingRemoteRef.current = true;
-        importDocument(document);
-        lastRemoteUpdatedAtRef.current = document.updatedAt;
-        lastPostedUpdatedAtRef.current = document.updatedAt;
-        window.setTimeout(() => { applyingRemoteRef.current = false; }, 0);
+      .then((doc) => {
+        if (cancelled) return;
+        if (!doc) {
+          // Server unreachable — fall through to IDB-only mode.
+          initDoneRef.current = true;
+          return;
+        }
+        serverDocRef.current = doc;
+        tryCompleteInit();
       })
-      .catch(() => {});
+      .catch(() => { initDoneRef.current = true; });
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    return () => {
-      cancelled = true;
-    };
-  }, [importDocument]);
-
+  // Phase 2: wait for IDB hydration to finish.
   useEffect(() => {
     if (!isLocalServer()) return;
-    const interval = window.setInterval(() => {
-      fetchWorkingIds()
-        .then((ids) => {
-          finishWorking();
-          if (ids.length > 0) markWorking(ids);
-        })
-        .catch(() => {});
-    }, POLL_MS);
-    return () => window.clearInterval(interval);
-  }, [finishWorking, markWorking]);
+    if (useCanvasStore.persist.hasHydrated()) {
+      idbReadyRef.current = true;
+      tryCompleteInit();
+    } else {
+      return useCanvasStore.persist.onFinishHydration(() => {
+        idbReadyRef.current = true;
+        tryCompleteInit();
+      });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!isLocalServer()) return;
@@ -153,6 +163,7 @@ export default function LocalDocumentBridge() {
   useEffect(() => {
     if (!isLocalServer()) return;
     const unsubscribe = useCanvasStore.subscribe((state) => {
+      if (!initDoneRef.current) return;
       if (applyingRemoteRef.current) return;
       const document = state.exportDocument();
       if (document.updatedAt === lastPostedUpdatedAtRef.current) return;

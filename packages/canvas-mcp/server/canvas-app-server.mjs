@@ -290,7 +290,7 @@ export function createCanvasAppServer() {
         sendJson(response, 200, { request: await readScreenshotRequest() });
       } else if (url.pathname === '/api/screenshot-response' && request.method === 'POST') {
         sendJson(response, 200, await writeScreenshotResponse(JSON.parse(await readBody(request))));
-      } else if (url.pathname.startsWith('/assets/')) {
+      } else if (/^\/assets\/[\w-]+(\/|$)/.test(url.pathname)) {
         await handleAssetRequest(url.pathname, request, response);
       } else {
         await serveStatic(request, response);

@@ -92,7 +92,6 @@ function normalizeDocument(value: unknown): CanvasDocument | null {
       scale:
         typeof value.viewport?.scale === "number" ? value.viewport.scale : 1,
     },
-    links: Array.isArray(value.links) ? value.links : [],
   };
 }
 

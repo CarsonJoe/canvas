@@ -716,6 +716,9 @@ function TextRenderer({
       fontSize={obj.fontSize}
       fill={obj.color}
       fontFamily={obj.fontFamily}
+      width={obj.width}
+      wrap={obj.width ? 'word' : 'none'}
+      align={obj.align ?? 'left'}
       draggable={tool === 'select'}
       onPointerDown={onSelect}
       onDragStart={(e) => { setNodeStageCursor(e.target, 'grabbing'); onDragStart(e); }}
@@ -988,7 +991,6 @@ export default function InfiniteCanvas() {
     setOutpaintFrameId,
     incrementFrameCount,
     contextFrameIds, contextPickerActive, toggleContextFrame,
-    workingObjectIds,
     setCaptureFrameSnapshot, setCaptureScreenshot,
     undo, redo,
   } = useCanvasStore();
@@ -1049,6 +1051,49 @@ export default function InfiniteCanvas() {
     });
     return () => setCaptureScreenshot(null);
   }, [setCaptureScreenshot, stageScale, stageX, stageY]);
+
+  // ── Flatten content frames ─────────────────────────────────────────────────
+  // Objects with flatten:true are processing directives: the agent created them
+  // with source content, and we resolve them to canvas primitives here in the
+  // browser where DOM measurement and mermaid.js are available.
+  const processingFlattenRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const pending = objects.filter(
+      (o): o is FrameObject =>
+        o.type === 'frame' &&
+        !!(o as FrameObject).flatten &&
+        !!(o as FrameObject).source &&
+        !processingFlattenRef.current.has(o.id),
+    );
+    if (pending.length === 0) return;
+    pending.forEach((frame) => processingFlattenRef.current.add(frame.id));
+
+    (async () => {
+      const { markdownToCanvasObjects, mermaidToCanvasObjects, svgToCanvasObjects, htmlToCanvasObjects } =
+        await import('../utils/contentTransform');
+
+      for (const frame of pending) {
+        try {
+          let newObjects: CanvasObject[] = [];
+          const src = frame.source!;
+          const kind = frame.kind as string;
+          if (kind === 'markdown') newObjects = await markdownToCanvasObjects(src, frame.x, frame.y, frame.width);
+          else if (kind === 'mermaid') newObjects = await mermaidToCanvasObjects(src, frame.x, frame.y);
+          else if (kind === 'svg') newObjects = svgToCanvasObjects(src, frame.x, frame.y);
+          else if (kind === 'html') newObjects = await htmlToCanvasObjects(src, frame.x, frame.y, frame.width);
+
+          if (newObjects.length > 0) {
+            removeObjects([frame.id]);
+            addObjects(newObjects, newObjects.map((o) => o.id));
+          }
+        } catch (err) {
+          console.error('Flatten failed for', frame.id, err);
+        } finally {
+          processingFlattenRef.current.delete(frame.id);
+        }
+      }
+    })();
+  }, [objects, addObjects, removeObjects]);
 
   // ── Drawing state ──────────────────────────────────────────────────────────
   const currentPointsRef = useRef<number[]>([]);
@@ -1423,6 +1468,54 @@ export default function InfiniteCanvas() {
 
       const text = clipboard.getData('text/plain');
       if (text.trim()) {
+        const trimmed = text.trim();
+        const isHtml = /^<(!DOCTYPE\s+html|html[\s>])/i.test(trimmed) || /^<(div|section|article|main|header|body)[\s>]/i.test(trimmed);
+        const isSvg = /^<svg[\s>]/i.test(trimmed);
+        const isMermaid = /^(graph\s|flowchart\s|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie\s|journey|gitGraph|mindmap|timeline|quadrantChart)/im.test(trimmed);
+        const isMarkdown = !isSvg && !isHtml && !isMermaid && /^(#{1,6}\s|[-*+]\s|\d+\.\s|>\s|```|---|\*\*|__|!\[)/m.test(trimmed);
+
+        if (isSvg || isMermaid || isMarkdown || isHtml) {
+          e.preventDefault();
+          const kind = isSvg ? 'svg' : isMermaid ? 'mermaid' : isMarkdown ? 'markdown' : 'html';
+          const assetKinds = ['html'] as string[];
+          if (assetKinds.includes(kind)) {
+            // HTML content frame gets a URL once the server writes its asset file.
+            // For paste, we create it locally; URL assignment happens via MCP on agent path
+            const id = nanoid();
+            addObjects([{
+              id,
+              type: 'frame',
+              kind: kind as FrameObject['kind'],
+              x: anchor.x, y: anchor.y,
+              width: 720, height: 480,
+              label: `${kind.charAt(0).toUpperCase()}${kind.slice(1)} Asset`,
+              background: '#ffffff',
+              url: null, imageData: null, generating: false, priorBounds: null,
+              source: trimmed,
+              flatten: false,
+            }], [id]);
+          } else {
+            // SVG / Mermaid / Markdown → flatten to canvas primitives
+            const id = nanoid();
+            addObjects([{
+              id,
+              type: 'frame',
+              kind: kind as FrameObject['kind'],
+              x: anchor.x, y: anchor.y,
+              width: 640, height: 480,
+              label: kind,
+              background: '#181818',
+              url: null, imageData: null, generating: false, priorBounds: null,
+              source: trimmed,
+              flatten: true,
+            }], [id]);
+          }
+          setTool('select');
+          justCreatedRef.current = true;
+          window.requestAnimationFrame(() => { justCreatedRef.current = false; });
+          return;
+        }
+
         if (pasteText(text, anchor)) e.preventDefault();
         return;
       }
@@ -2319,7 +2412,6 @@ export default function InfiniteCanvas() {
 
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const contextFrameIdSet = useMemo(() => new Set(contextFrameIds), [contextFrameIds]);
-  const workingObjectIdSet = useMemo(() => new Set(workingObjectIds), [workingObjectIds]);
   const viewportBounds = useMemo(
     () => getViewportWorldBounds(stageX, stageY, stageScale, size.w, size.h),
     [stageX, stageY, stageScale, size.w, size.h],
@@ -2337,18 +2429,15 @@ export default function InfiniteCanvas() {
         return 0;
       });
   }, [objects, selectedIdSet, contextFrameIdSet, viewportBounds]);
+  const CONTENT_ASSET_KINDS = ['html', 'markdown', 'mermaid', 'svg'] as const;
+  const isContentAsset = (obj: CanvasObject): obj is FrameObject =>
+    obj.type === 'frame' && CONTENT_ASSET_KINDS.includes(obj.kind as never) && !!obj.url && !(obj as FrameObject).flatten;
+
   const visibleSiteFrames = useMemo(() => (
     sortedVisibleObjects.filter((obj): obj is FrameObject =>
-      obj.type === 'frame' && (obj.kind === 'site' || (!obj.kind && !!obj.url)) && !!obj.url
+      obj.type === 'frame' && (obj.kind === 'site' || (!obj.kind && !!obj.url) || isContentAsset(obj)) && !!obj.url
     )
   ), [sortedVisibleObjects]);
-  const workingBoxes = useMemo(() => (
-    objects
-      .filter((obj) => workingObjectIdSet.has(obj.id))
-      .map((obj) => ({ id: obj.id, box: expandedBBox(obj) }))
-      .filter((item): item is { id: string; box: { x: number; y: number; w: number; h: number } } => !!item.box)
-  ), [objects, workingObjectIdSet]);
-
   const cursor = spaceHeld || tool === 'pan' ? 'grab'
     : tool === 'pen' || tool === 'eraser' || tool === 'rect' || tool === 'ellipse'
       || tool === 'line' || tool === 'arrow' || isFrameTool(tool) ? 'crosshair'
@@ -2641,30 +2730,6 @@ export default function InfiniteCanvas() {
 
         {/* Live drawing */}
         <Layer listening={false}>
-          {workingBoxes.map(({ id, box }) => (
-            <Group key={`working-${id}`}>
-              <Rect
-                x={box.x - 6}
-                y={box.y - 6}
-                width={box.w + 12}
-                height={box.h + 12}
-                stroke="#14b8a6"
-                strokeWidth={2 / stageScale}
-                dash={[8 / stageScale, 5 / stageScale]}
-                cornerRadius={6 / stageScale}
-                listening={false}
-              />
-              <Text
-                x={box.x - 6}
-                y={box.y - 28 / stageScale}
-                text="agent"
-                fill="#14b8a6"
-                fontSize={12 / stageScale}
-                fontFamily="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
-                listening={false}
-              />
-            </Group>
-          ))}
           {livePoints.length >= 4 && (
             <PressureStrokeLines
               points={livePoints}

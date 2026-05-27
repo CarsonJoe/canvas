@@ -1,6 +1,6 @@
 {
   "name": "@cogniboom/canvas",
-  "version": "0.2.2",
+  "version": "0.2.7",
   "description": "Local Cogniboom Canvas app server and MCP helper.",
   "type": "module",
   "bin": {

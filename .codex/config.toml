@@ -2,6 +2,33 @@
 args = ["serve"]
 command = "canvas"
 
+[mcp_servers.canvas.tools."canvas.get_basic_info"]
+approval_mode = "approve"
+
+[mcp_servers.canvas.tools."canvas.get_guide"]
+approval_mode = "approve"
+
+[mcp_servers.canvas.tools."canvas.get_document"]
+approval_mode = "approve"
+
+[mcp_servers.canvas.tools."canvas.create_frame"]
+approval_mode = "approve"
+
+[mcp_servers.canvas.tools."canvas.create_objects"]
+approval_mode = "approve"
+
+[mcp_servers.canvas.tools."canvas.apply_patch"]
+approval_mode = "approve"
+
+[mcp_servers.canvas.tools."canvas.get_screenshot"]
+approval_mode = "approve"
+
+[mcp_servers.canvas.tools."canvas.launch"]
+approval_mode = "approve"
+
+[mcp_servers.canvas.tools."canvas.get_tree_summary"]
+approval_mode = "approve"
+
 [mcp_servers.cogniboom-canvas]
 args = ["serve"]
 command = "canvas"

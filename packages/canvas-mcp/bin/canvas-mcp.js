@@ -88,14 +88,16 @@ async function checkAndAutoUpdate() {
   } catch { return; }
 
   const latest = await fetchLatestVersion();
-  if (!latest || latest === packageJson.version) return;
+  if (!latest || latest === packageJson.version) return false;
 
   console.error(`[canvas] Update available: ${packageJson.version} → ${latest}. Installing...`);
   const ok = await spawnNpmInstall(latest);
   if (ok) {
-    console.error(`[canvas] Updated to ${latest}. Restart your agent client to use the new version.`);
+    console.error(`[canvas] Updated to ${latest}.`);
+    return true;
   } else {
     console.error(`[canvas] Auto-update failed. Run: npm install -g @cogniboom/canvas@latest`);
+    return false;
   }
 }
 
@@ -404,12 +406,22 @@ ${portAvailable ? `Start HTTP mode with: ${httpCommand}` : 'If this is not Canva
 async function main() {
   if (command === 'serve') {
     const { startStdioMcpServer } = await importScript('scripts/canvas-mcp-server.mjs');
-    checkAndAutoUpdate().catch(() => {});
+    // Run update check in background. If a new version installs, exit so the
+    // MCP client auto-restarts us on the fresh binary.
+    checkAndAutoUpdate().then((updated) => {
+      if (updated) {
+        console.error('[canvas] Restarting to apply update...');
+        process.exit(0);
+      }
+    }).catch(() => {});
     await startStdioMcpServer({ startApp: true, open: false });
     return;
   }
 
   if (command === 'http') {
+    checkAndAutoUpdate().then((updated) => {
+      if (updated) console.log('[canvas] Updated. Restart the server to use the new version.');
+    }).catch(() => {});
     const { createCanvasAppServer, openBrowser } = await importScript('scripts/canvas-app-server.mjs');
     const server = createCanvasAppServer();
     server.listen(port, host, () => {

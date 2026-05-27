@@ -97,6 +97,8 @@ export interface TextObject {
   fontSize: number;
   color: string;
   fontFamily: string;
+  width?: number;
+  align?: 'left' | 'center' | 'right';
 }
 
 export interface CommentObject {
@@ -111,10 +113,12 @@ export interface CommentObject {
   createdAt: string;
 }
 
+export type ContentFrameKind = 'html' | 'markdown' | 'mermaid' | 'svg';
+
 export interface FrameObject {
   id: string;
   type: 'frame';
-  kind: 'plain' | 'image' | 'site';
+  kind: 'plain' | 'image' | 'site' | ContentFrameKind;
   x: number;
   y: number;
   width: number;
@@ -126,6 +130,9 @@ export interface FrameObject {
   generating: boolean;
   // Bounds before the most recent expansion (for outpainting)
   priorBounds: { x: number; y: number; width: number; height: number } | null;
+  // Content frames: raw source + processing mode
+  source?: string;
+  flatten?: boolean;
 }
 
 export type CanvasObject =
@@ -137,16 +144,6 @@ export type CanvasObject =
   | TextObject
   | CommentObject
   | FrameObject;
-
-export interface ProjectLink {
-  id: string;
-  kind: 'local-project';
-  name: string;
-  path?: string;
-  repoRoot?: string;
-  previewUrl?: string;
-  createdAt: string;
-}
 
 export interface CanvasDocument {
   version: 1;
@@ -161,7 +158,6 @@ export interface CanvasDocument {
     y: number;
     scale: number;
   };
-  links?: ProjectLink[];
 }
 
 export type CanvasPatch =

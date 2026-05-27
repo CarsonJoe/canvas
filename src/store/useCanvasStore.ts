@@ -5,7 +5,6 @@ import {
   CanvasObject,
   CanvasPatch,
   FrameObject,
-  ProjectLink,
   ToolType,
 } from '../types/canvas';
 
@@ -81,7 +80,6 @@ interface CanvasSnapshot {
   selectedIds: string[];
   outpaintFrameId: string | null;
   frameCount: number;
-  links: ProjectLink[];
 }
 
 export interface CanvasScene {
@@ -204,17 +202,6 @@ interface CanvasState {
   recentColors: string[];
   addRecentColor: (c: string) => void;
 
-  // Linked independent projects
-  links: ProjectLink[];
-  linkProject: (link: Omit<ProjectLink, 'id' | 'kind' | 'createdAt'> & Partial<Pick<ProjectLink, 'id' | 'createdAt'>>) => ProjectLink;
-  unlinkProject: (id: string) => void;
-  setPreviewUrl: (id: string, previewUrl: string | undefined) => void;
-
-  // Transient collaboration indicators
-  workingObjectIds: string[];
-  markWorking: (ids: string[]) => void;
-  finishWorking: (ids?: string[]) => void;
-
   // LLM change notifications
   pendingLlmChangeCount: number;
   addPendingLlmChanges: (n: number) => void;
@@ -251,7 +238,6 @@ function snapshot(s: CanvasState): CanvasSnapshot {
     selectedIds: s.selectedIds,
     outpaintFrameId: s.outpaintFrameId,
     frameCount: s.frameCount,
-    links: s.links,
   };
 }
 
@@ -346,7 +332,6 @@ function documentFromState(s: CanvasState): CanvasDocument {
       y: s.stageY,
       scale: s.stageScale,
     },
-    links: s.links,
   };
 }
 
@@ -363,12 +348,10 @@ function stateFromDocument(document: CanvasDocument): Partial<CanvasState> {
     stageY: document.viewport?.y ?? 0,
     stageScale: document.viewport?.scale ?? 1,
     frameCount: objects.filter((obj) => obj.type === 'frame').length,
-    links: document.links ?? [],
     outpaintFrameId: null,
     contextFrameIds: [],
     contextPickerActive: false,
     isGenerating: false,
-    workingObjectIds: [],
   };
 }
 
@@ -385,7 +368,6 @@ function persistedState(s: CanvasState): Partial<CanvasState> {
     documentName: s.documentName,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
-    links: s.links,
   };
 }
 
@@ -410,8 +392,6 @@ function sanitizePersistedState(value: unknown): Partial<CanvasState> {
     documentName: typeof state.documentName === 'string' ? state.documentName : 'Untitled canvas',
     createdAt: typeof state.createdAt === 'string' ? state.createdAt : new Date().toISOString(),
     updatedAt: typeof state.updatedAt === 'string' ? state.updatedAt : new Date().toISOString(),
-    links: Array.isArray(state.links) ? state.links : [],
-    workingObjectIds: [],
   };
 }
 
@@ -486,7 +466,6 @@ export const useCanvasStore = create<CanvasState>()(persist((set, get) => ({
       return withHistory(s, {
         objects: s.objects.filter((o) => !ids.includes(o.id)),
         selectedIds: s.selectedIds.filter((id) => !ids.includes(id)),
-        workingObjectIds: s.workingObjectIds.filter((id) => !ids.includes(id)),
         ...touchUpdatedAt(),
       });
     }),
@@ -607,40 +586,6 @@ export const useCanvasStore = create<CanvasState>()(persist((set, get) => ({
   addRecentColor: (c) =>
     set((s) => ({
       recentColors: [c, ...s.recentColors.filter((r) => r !== c)].slice(0, 12),
-    })),
-
-  links: [],
-  linkProject: (link) => {
-    const now = new Date().toISOString();
-    const projectLink: ProjectLink = {
-      id: link.id ?? makeId('proj'),
-      kind: 'local-project',
-      name: link.name,
-      path: link.path,
-      repoRoot: link.repoRoot,
-      previewUrl: link.previewUrl,
-      createdAt: link.createdAt ?? now,
-    };
-    set((s) => ({ links: [...s.links.filter((item) => item.id !== projectLink.id), projectLink], ...touchUpdatedAt() }));
-    return projectLink;
-  },
-  unlinkProject: (id) => set((s) => ({ links: s.links.filter((link) => link.id !== id), ...touchUpdatedAt() })),
-  setPreviewUrl: (id, previewUrl) =>
-    set((s) => ({
-      links: s.links.map((link) => link.id === id ? { ...link, previewUrl } : link),
-      ...touchUpdatedAt(),
-    })),
-
-  workingObjectIds: [],
-  markWorking: (ids) =>
-    set((s) => ({
-      workingObjectIds: Array.from(new Set([...s.workingObjectIds, ...ids])),
-    })),
-  finishWorking: (ids) =>
-    set((s) => ({
-      workingObjectIds: ids
-        ? s.workingObjectIds.filter((id) => !ids.includes(id))
-        : [],
     })),
 
   pendingLlmChangeCount: 0,

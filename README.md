@@ -2,7 +2,7 @@
 
 An infinite canvas that AI agents can read and write through MCP (Model Context Protocol).
 
-Open the canvas in your browser, connect a local helper, and your AI agent can place shapes, draw diagrams, annotate frames, take screenshots, and link to other local projects — all in real time.
+Open the canvas in your browser, connect a local helper, and your AI agent can place shapes, draw diagrams, annotate frames, create site preview frames, and take screenshots — all in real time.
 
 ## How it works
 
@@ -12,7 +12,13 @@ The project has two parts:
 
 **Local MCP helper** (`@cogniboom/canvas`) — an npm package you install once. It serves the canvas app locally and exposes an MCP endpoint so agent clients (Claude, Cursor, etc.) can interact with the live canvas.
 
-When both are running, the helper bridges your agent client to the open browser tab. The agent can read the document state, create and update objects, capture screenshots, and link external projects.
+When both are running, the helper bridges your agent client to the open browser tab. The agent can read the document state, create and update objects, and capture screenshots.
+
+In local MCP mode, project data is stored in the current workspace under `.canvas/`:
+
+- `.canvas/canvas.json` is the canvas document.
+- `.canvas/assets/` contains editable source files for rich content frames.
+- `.canvas/runtime/` contains helper coordination files and is ignored.
 
 ## Quick start
 
@@ -59,7 +65,7 @@ Through MCP, an agent can:
 - Update, move, duplicate, or delete objects by ID
 - Capture a screenshot of the canvas or a specific frame
 - Annotate frames with text, arrows, and strokes
-- Link local projects and set preview URLs for site frames
+- Create site frames that display preview URLs
 - Apply structured patch operations for batch edits
 
 ## Canvas objects

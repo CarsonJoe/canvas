@@ -1,51 +1,29 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const repoRoot = path.resolve(__dirname, '..');
-export const localDataDir = process.env.COGNIBOOM_CANVAS_DATA_DIR
-  ? path.resolve(process.env.COGNIBOOM_CANVAS_DATA_DIR)
-  : process.env.COGNIBOOM_CANVAS_PACKAGE_MODE === '1'
-    ? defaultUserDataDir()
-    : path.join(repoRoot, '.canvas-local');
-
-function detectGitRoot() {
-  if (!process.env.COGNIBOOM_CANVAS_PACKAGE_MODE) return null;
-  if (process.env.COGNIBOOM_CANVAS_DATA_DIR) return null;
-  try {
-    const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 3000 });
-    return result.status === 0 ? result.stdout.trim() : null;
-  } catch {
-    return null;
-  }
-}
-
-const gitRoot = detectGitRoot();
-export const documentPath = gitRoot
-  ? path.join(gitRoot, 'whiteboard.canvas.json')
-  : path.join(localDataDir, 'current.canvas.json');
-export const workingPath = path.join(localDataDir, 'working.json');
-export const screenshotRequestPath = path.join(localDataDir, 'screenshot-request.json');
-export const screenshotResponsePath = path.join(localDataDir, 'screenshot-response.json');
-export const logsDir = path.join(localDataDir, 'logs');
-export const appPort = Number(process.env.CANVAS_PORT ?? 3762);
+export const workspaceRoot = path.resolve(process.cwd());
+export const canvasDir = path.join(workspaceRoot, '.canvas');
+export const assetsDir = path.join(canvasDir, 'assets');
+export const runtimeDir = path.join(canvasDir, 'runtime');
+export const documentPath = path.join(canvasDir, 'canvas.json');
+export const screenshotRequestPath = path.join(runtimeDir, 'screenshot-request.json');
+export const screenshotResponsePath = path.join(runtimeDir, 'screenshot-response.json');
+export const logsDir = path.join(runtimeDir, 'logs');
+export let appPort = Number(process.env.CANVAS_PORT ?? 3762);
 export const appHost = '127.0.0.1';
-export const appUrl = `http://${appHost}:${appPort}`;
-export const mcpHttpUrl = `${appUrl}/mcp`;
+export let appUrl = `http://${appHost}:${appPort}`;
+export let mcpHttpUrl = `${appUrl}/mcp`;
+
+export function setAppPort(port) {
+  appPort = port;
+  appUrl = `http://${appHost}:${port}`;
+  mcpHttpUrl = `${appUrl}/mcp`;
+}
 export const helperVersion = process.env.COGNIBOOM_CANVAS_HELPER_VERSION ?? '0.1.0';
 export const appVersion = process.env.COGNIBOOM_CANVAS_APP_VERSION ?? '0.1.0';
-
-function defaultUserDataDir() {
-  if (process.platform === 'win32') {
-    return path.join(process.env.LOCALAPPDATA ?? path.join(process.env.USERPROFILE ?? repoRoot, 'AppData', 'Local'), 'CogniboomCanvas');
-  }
-  if (process.platform === 'darwin') {
-    return path.join(process.env.HOME ?? repoRoot, 'Library', 'Application Support', 'CogniboomCanvas');
-  }
-  return path.join(process.env.XDG_DATA_HOME ?? path.join(process.env.HOME ?? repoRoot, '.local', 'share'), 'cogniboom-canvas');
-}
 
 export function now() {
   return new Date().toISOString();
@@ -66,13 +44,50 @@ export function defaultDocument() {
     objects: [],
     selectedIds: [],
     viewport: { x: 0, y: 0, scale: 1 },
-    links: [],
   };
 }
 
 export async function ensureDataDir() {
-  await fs.mkdir(localDataDir, { recursive: true });
+  await fs.mkdir(canvasDir, { recursive: true });
+  await fs.mkdir(assetsDir, { recursive: true });
+  await fs.mkdir(runtimeDir, { recursive: true });
   await fs.mkdir(logsDir, { recursive: true });
+}
+
+export async function readAssetSource(id) {
+  const candidates = [
+    { filePath: path.join(assetsDir, `${id}.md`), format: 'markdown' },
+    { filePath: path.join(assetsDir, `${id}.html`), format: 'html' },
+    { filePath: path.join(assetsDir, `${id}.svg`), format: 'svg' },
+  ];
+  for (const candidate of candidates) {
+    try {
+      return {
+        content: await fs.readFile(candidate.filePath, 'utf8'),
+        format: candidate.format,
+        filePath: candidate.filePath,
+      };
+    } catch {}
+  }
+  return null;
+}
+
+export async function writeAssetSource(id, content, format) {
+  await ensureDataDir();
+  const ext = format === 'html' ? 'html' : format === 'svg' ? 'svg' : 'md';
+  const filePath = path.join(assetsDir, `${id}.${ext}`);
+  await fs.writeFile(filePath, content, 'utf8');
+  return filePath;
+}
+
+export async function assetMtime(id) {
+  for (const ext of ['md', 'html', 'svg']) {
+    try {
+      const stat = await fs.stat(path.join(assetsDir, `${id}.${ext}`));
+      return stat.mtimeMs;
+    } catch {}
+  }
+  return null;
 }
 
 export async function readDocument() {
@@ -94,24 +109,6 @@ export async function writeDocument(document) {
   const normalized = normalizeDocument(document);
   await fs.writeFile(documentPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
   return normalized;
-}
-
-export async function readWorkingIds() {
-  await ensureDataDir();
-  try {
-    const raw = await fs.readFile(workingPath, 'utf8');
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed.ids) ? parsed.ids.filter((id) => typeof id === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
-export async function writeWorkingIds(ids) {
-  await ensureDataDir();
-  const uniqueIds = Array.from(new Set((ids ?? []).filter((id) => typeof id === 'string')));
-  await fs.writeFile(workingPath, `${JSON.stringify({ ids: uniqueIds, updatedAt: now() }, null, 2)}\n`, 'utf8');
-  return uniqueIds;
 }
 
 export async function readScreenshotRequest() {
@@ -176,7 +173,6 @@ export function normalizeDocument(value) {
       y: typeof value.viewport?.y === 'number' ? value.viewport.y : 0,
       scale: typeof value.viewport?.scale === 'number' ? value.viewport.scale : 1,
     },
-    links: Array.isArray(value.links) ? value.links : [],
   };
 }
 
@@ -185,20 +181,24 @@ export function normalizeCanvasObject(object) {
   const id = typeof object.id === 'string' && object.id ? object.id : makeId(object.type || 'object');
 
   if (object.type === 'frame') {
+    const contentKinds = ['html', 'markdown', 'mermaid', 'svg'];
+    const isContent = contentKinds.includes(object.kind);
     return {
       id,
       type: 'frame',
       kind: object.kind || 'plain',
       x: Number.isFinite(object.x) ? object.x : 0,
       y: Number.isFinite(object.y) ? object.y : 0,
-      width: Number.isFinite(object.width) ? object.width : 320,
-      height: Number.isFinite(object.height) ? object.height : 180,
-      label: typeof object.label === 'string' ? object.label : 'Frame',
+      width: Number.isFinite(object.width) ? object.width : (isContent ? 640 : 320),
+      height: Number.isFinite(object.height) ? object.height : (isContent ? 480 : 180),
+      label: typeof object.label === 'string' ? object.label : (isContent ? String(object.kind).charAt(0).toUpperCase() + String(object.kind).slice(1) : 'Frame'),
       background: typeof object.background === 'string' ? object.background : (object.kind === 'site' ? '#ffffff' : '#181818'),
       url: object.url ?? null,
       imageData: object.imageData ?? null,
       generating: false,
       priorBounds: object.priorBounds ?? null,
+      ...(isContent && typeof object.source === 'string' ? { source: object.source } : {}),
+      ...(isContent && object.flatten != null ? { flatten: !!object.flatten } : {}),
     };
   }
 
@@ -248,8 +248,10 @@ export function objectBounds(object) {
     };
   }
   if (object.type === 'text' || object.type === 'comment') {
-    const fontSize = object.type === 'text' ? object.fontSize : 14;
-    return { x: object.x, y: object.y - fontSize, width: String(object.text ?? '').length * fontSize * 0.6, height: fontSize * 1.2 };
+    const fontSize = object.type === 'text' ? (object.fontSize ?? 24) : 14;
+    const lines = String(object.text ?? '').split('\n');
+    const longestLine = lines.reduce((max, line) => Math.max(max, line.length), 0);
+    return { x: object.x, y: object.y - fontSize, width: longestLine * fontSize * 0.6, height: lines.length * fontSize * 1.4 };
   }
   if (object.type === 'stroke' && Array.isArray(object.points) && object.points.length >= 2) {
     const xs = object.points.filter((_, index) => index % 2 === 0);
@@ -328,7 +330,7 @@ export async function applyPatches(patches) {
   return writeDocument({ ...document, objects, selectedIds, viewport, updatedAt: now() });
 }
 
-export const changesPath = path.join(localDataDir, 'changes.ndjson');
+export const changesPath = path.join(runtimeDir, 'changes.ndjson');
 
 let _nextChangeSeq = null;
 
@@ -357,7 +359,7 @@ export async function appendChange({ author, op, objectIds = [], focusId = null 
   }
   const seq = await nextChangeSeq();
   const entry = JSON.stringify({ seq, ts: now(), author, op, objectIds, focusId, focusCenter });
-  await fs.mkdir(localDataDir, { recursive: true });
+  await fs.mkdir(runtimeDir, { recursive: true });
   await fs.appendFile(changesPath, entry + '\n', 'utf8');
   return seq;
 }
@@ -400,6 +402,5 @@ export function summarizeDocument(document) {
     objectCounts,
     viewport: document.viewport,
     selectedIds: document.selectedIds,
-    linkedProjects: document.links ?? [],
   };
 }

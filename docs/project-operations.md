@@ -25,27 +25,22 @@ The hosted app must support bring-your-own-key for image generation. Do not embe
 
 ## Data Storage
 
-Canvas data is stored per-user in the OS app-data directory, not in the repo:
+Browser-only hosted mode stores canvas data in browser IndexedDB.
 
-- **Linux**: `~/.local/share/cogniboom-canvas/`
-- **macOS**: `~/Library/Application Support/CogniboomCanvas/`
-- **Windows**: `%LOCALAPPDATA%\CogniboomCanvas\`
+Local MCP mode stores project data in the current workspace:
 
-This means canvas data never appears in git, regardless of which repo the agent is running in. To scope data to a specific project today, set `COGNIBOOM_CANVAS_DATA_DIR` in the MCP server environment:
-
-```json
-{
-  "mcpServers": {
-    "cogniboom-canvas": {
-      "command": "canvas",
-      "args": ["serve"],
-      "env": { "COGNIBOOM_CANVAS_DATA_DIR": "/path/to/project/.canvas" }
-    }
-  }
-}
+```text
+.canvas/
+  canvas.json
+  assets/
+  runtime/
+    screenshot-request.json
+    screenshot-response.json
+    changes.ndjson
+    logs/
 ```
 
-Add `.canvas/` to that project's `.gitignore` if you go this route.
+`canvas.json` and `assets/` are project artifacts. `runtime/` is helper coordination state and should stay ignored.
 
 ## Local Development
 

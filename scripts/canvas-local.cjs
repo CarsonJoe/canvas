@@ -6,21 +6,26 @@ const readline = require('node:readline');
 const { spawn, spawnSync } = require('node:child_process');
 
 const repoRoot = process.cwd();
-const localDataDir = path.join(repoRoot, '.canvas-local');
-const documentPath = path.join(localDataDir, 'current.canvas.json');
-const workingPath = path.join(localDataDir, 'working.json');
-const screenshotRequestPath = path.join(localDataDir, 'screenshot-request.json');
-const screenshotResponsePath = path.join(localDataDir, 'screenshot-response.json');
+const canvasDir = path.join(repoRoot, '.canvas');
+const assetsDir = path.join(canvasDir, 'assets');
+const runtimeDir = path.join(canvasDir, 'runtime');
+const documentPath = path.join(canvasDir, 'canvas.json');
+const screenshotRequestPath = path.join(runtimeDir, 'screenshot-request.json');
+const screenshotResponsePath = path.join(runtimeDir, 'screenshot-response.json');
 const distDir = path.join(repoRoot, 'dist');
 const port = Number(process.env.CANVAS_PORT || 3762);
 const host = '127.0.0.1';
 
 function now() { return new Date().toISOString(); }
 function makeId(prefix) { return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`; }
-function ensureDataDirSync() { fs.mkdirSync(localDataDir, { recursive: true }); }
+function ensureDataDirSync() {
+  fs.mkdirSync(canvasDir, { recursive: true });
+  fs.mkdirSync(assetsDir, { recursive: true });
+  fs.mkdirSync(runtimeDir, { recursive: true });
+}
 function defaultDocument() {
   const timestamp = now();
-  return { version: 1, id: makeId('doc'), name: 'Untitled canvas', createdAt: timestamp, updatedAt: timestamp, objects: [], selectedIds: [], viewport: { x: 0, y: 0, scale: 1 }, links: [] };
+  return { version: 1, id: makeId('doc'), name: 'Untitled canvas', createdAt: timestamp, updatedAt: timestamp, objects: [], selectedIds: [], viewport: { x: 0, y: 0, scale: 1 } };
 }
 function normalizeDocument(value) {
   if (!value || typeof value !== 'object') return defaultDocument();
@@ -36,7 +41,6 @@ function normalizeDocument(value) {
     objects,
     selectedIds: Array.isArray(value.selectedIds) ? value.selectedIds.filter((id) => ids.has(id)) : [],
     viewport: { x: value.viewport?.x || 0, y: value.viewport?.y || 0, scale: value.viewport?.scale || 1 },
-    links: Array.isArray(value.links) ? value.links : [],
   };
 }
 async function readDocument() {
@@ -58,19 +62,6 @@ async function writeDocument(document) {
   const normalized = normalizeDocument(document);
   await fsp.writeFile(documentPath, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
   return normalized;
-}
-async function readWorkingIds() {
-  ensureDataDirSync();
-  try {
-    const parsed = JSON.parse(await fsp.readFile(workingPath, 'utf8'));
-    return Array.isArray(parsed.ids) ? parsed.ids.filter((id) => typeof id === 'string') : [];
-  } catch { return []; }
-}
-async function writeWorkingIds(ids) {
-  ensureDataDirSync();
-  const uniqueIds = Array.from(new Set((ids || []).filter((id) => typeof id === 'string')));
-  await fsp.writeFile(workingPath, `${JSON.stringify({ ids: uniqueIds, updatedAt: now() }, null, 2)}\n`, 'utf8');
-  return uniqueIds;
 }
 async function readScreenshotRequest() {
   ensureDataDirSync();
@@ -213,7 +204,7 @@ async function applyPatches(patches) {
 function summarizeDocument(document) {
   const objectCounts = {};
   for (const object of document.objects) objectCounts[object.type] = (objectCounts[object.type] || 0) + 1;
-  return { document: { id: document.id, name: document.name, createdAt: document.createdAt, updatedAt: document.updatedAt }, objectCounts, viewport: document.viewport, selectedIds: document.selectedIds, linkedProjects: document.links || [] };
+  return { document: { id: document.id, name: document.name, createdAt: document.createdAt, updatedAt: document.updatedAt }, objectCounts, viewport: document.viewport, selectedIds: document.selectedIds };
 }
 
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png' };
@@ -265,8 +256,6 @@ function createAppServer() {
       else if (url.pathname === '/api/document' && request.method === 'GET') sendJson(response, 200, await readDocument());
       else if (url.pathname === '/api/document' && request.method === 'POST') sendJson(response, 200, await writeDocument(JSON.parse(await readBody(request))));
       else if (url.pathname === '/api/patch' && request.method === 'POST') sendJson(response, 200, await applyPatches(JSON.parse(await readBody(request))));
-      else if (url.pathname === '/api/working' && request.method === 'GET') sendJson(response, 200, { ids: await readWorkingIds() });
-      else if (url.pathname === '/api/working' && request.method === 'POST') sendJson(response, 200, { ids: await writeWorkingIds((JSON.parse(await readBody(request))).ids || []) });
       else if (url.pathname === '/api/screenshot-request' && request.method === 'GET') sendJson(response, 200, { request: await readScreenshotRequest() });
       else if (url.pathname === '/api/screenshot-response' && request.method === 'POST') sendJson(response, 200, await writeScreenshotResponse(JSON.parse(await readBody(request))));
       else await serveStatic(request, response);
@@ -281,47 +270,24 @@ function openBrowser(url) {
   child.unref();
 }
 
-const GUIDES = {
-  'canvas-mcp-instructions': 'Canvas is a live visual collaboration surface. Read before editing, patch incrementally, use stable IDs, request screenshots after meaningful visual changes, and ask before destructive edits.',
-  'mermaid-to-canvas': 'Convert Mermaid into native rect, ellipse, text, line, and arrow objects. Do not use static images as the default.',
-  'project-preview-workflow': 'Project previews are site frames linked to independent repos. Canvas stores metadata only.',
-  'annotation-workflow': 'Treat text, comments, arrows, and strokes with parentId or parentFrameId as annotations.',
-};
 function toolSchema(name, description, inputSchema = { type: 'object', properties: {} }) { return { name, description, inputSchema }; }
 const tools = [
-  toolSchema('canvas.get_guide', 'Return Canvas collaboration instructions.', { type: 'object', properties: { topic: { type: 'string' } } }),
-  toolSchema('canvas.get_basic_info', 'Return document metadata, counts, viewport, selection, and links.'),
-  toolSchema('canvas.get_document', 'Return the full document.'),
-  toolSchema('canvas.get_selection', 'Return selected objects.'),
+  toolSchema('canvas.get_document', 'Return the full current Canvas document, including objects, selectedIds, and viewport. Read this before making edits.'),
   toolSchema('canvas.get_object_info', 'Return an object and bounds.', { type: 'object', properties: { objectId: { type: 'string' } }, required: ['objectId'] }),
-  toolSchema('canvas.get_children', 'Return child objects.', { type: 'object', properties: { objectId: { type: 'string' } }, required: ['objectId'] }),
+  toolSchema('canvas.get_children', 'Return objects attached to an object through parentId or parentFrameId. Text, comments, arrows, and strokes attached this way are annotations.', { type: 'object', properties: { objectId: { type: 'string' } }, required: ['objectId'] }),
   toolSchema('canvas.get_tree_summary', 'Return a tree summary.', { type: 'object', properties: { objectId: { type: 'string' }, depth: { type: 'number' } } }),
-  toolSchema('canvas.get_annotations', 'Return annotations attached to a target.', { type: 'object', properties: { targetId: { type: 'string' } }, required: ['targetId'] }),
   toolSchema('canvas.get_screenshot', 'Capture a screenshot through the open local Canvas app.', { type: 'object', properties: { target: { type: 'object' }, scale: { type: 'number' }, timeoutMs: { type: 'number' } } }),
-  toolSchema('canvas.get_linked_projects', 'Return linked projects.'),
-  toolSchema('canvas.create_frame', 'Create a frame.', { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' }, width: { type: 'number' }, height: { type: 'number' }, label: { type: 'string' }, kind: { type: 'string' }, url: { type: 'string' } }, required: ['x', 'y', 'width', 'height'] }),
-  toolSchema('canvas.create_objects', 'Create objects.', { type: 'object', properties: { objects: { type: 'array' }, select: { type: 'boolean' } }, required: ['objects'] }),
-  toolSchema('canvas.update_objects', 'Patch objects.', { type: 'object', properties: { updates: { type: 'array' } }, required: ['updates'] }),
-  toolSchema('canvas.set_text_content', 'Set text content.', { type: 'object', properties: { objectId: { type: 'string' }, text: { type: 'string' } }, required: ['objectId', 'text'] }),
-  toolSchema('canvas.move_objects', 'Move objects.', { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } }, dx: { type: 'number' }, dy: { type: 'number' } }, required: ['ids', 'dx', 'dy'] }),
+  toolSchema('canvas.create_objects', 'Create native canvas objects. Use frame objects with kind "site" and url for previews; use parentId or parentFrameId to attach annotations or children.', { type: 'object', properties: { objects: { type: 'array' }, select: { type: 'boolean' } }, required: ['objects'] }),
+  toolSchema('canvas.update_objects', 'Patch existing objects by ID. Use this for text edits, moves, renames, style changes, frame URL changes, and other partial object updates.', { type: 'object', properties: { updates: { type: 'array' } }, required: ['updates'] }),
   toolSchema('canvas.duplicate_objects', 'Duplicate objects.', { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } }, offset: { type: 'object' } }, required: ['ids'] }),
   toolSchema('canvas.delete_objects', 'Delete objects.', { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } } }, required: ['ids'] }),
-  toolSchema('canvas.rename_objects', 'Rename objects.', { type: 'object', properties: { items: { type: 'array' } }, required: ['items'] }),
-  toolSchema('canvas.apply_patch', 'Apply CanvasPatch.', { type: 'object', properties: { patch: {} }, required: ['patch'] }),
-  toolSchema('canvas.create_project_preview', 'Create a site preview frame.', { type: 'object', properties: { projectId: { type: 'string' }, url: { type: 'string' }, bounds: { type: 'object' } }, required: ['projectId', 'url'] }),
-  toolSchema('canvas.link_project', 'Link a local project.', { type: 'object', properties: { name: { type: 'string' }, path: { type: 'string' }, repoRoot: { type: 'string' }, previewUrl: { type: 'string' } }, required: ['name'] }),
-  toolSchema('canvas.unlink_project', 'Unlink a project.', { type: 'object', properties: { projectId: { type: 'string' } }, required: ['projectId'] }),
-  toolSchema('canvas.set_preview_url', 'Set preview URL.', { type: 'object', properties: { projectId: { type: 'string' }, previewUrl: { type: 'string' } }, required: ['projectId'] }),
-  toolSchema('canvas.mark_working', 'Mark working IDs.', { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } } }, required: ['ids'] }),
-  toolSchema('canvas.finish_working', 'Clear working IDs.', { type: 'object', properties: { ids: { type: 'array', items: { type: 'string' } } } }),
+  toolSchema('canvas.apply_patch', 'Apply CanvasPatch operations for batch create, update, delete, selection, or viewport changes.', { type: 'object', properties: { patch: {} }, required: ['patch'] }),
+  toolSchema('canvas.launch', 'Open the Canvas app in the default browser. Optional: focusObjectId.', { type: 'object', properties: { focusObjectId: { type: 'string' } } }),
 ];
 function resultContent(data) { return { content: [{ type: 'text', text: typeof data === 'string' ? data : JSON.stringify(data, null, 2) }] }; }
 async function callTool(name, args = {}) {
   const document = await readDocument();
-  if (name === 'canvas.get_guide') return resultContent({ topic: args.topic || 'canvas-mcp-instructions', guide: GUIDES[args.topic] || GUIDES['canvas-mcp-instructions'], availableTopics: Object.keys(GUIDES) });
-  if (name === 'canvas.get_basic_info') return resultContent({ ...summarizeDocument(document), appUrl: `http://${host}:${port}`, workingIds: await readWorkingIds() });
-  if (name === 'canvas.get_document') return resultContent(document);
-  if (name === 'canvas.get_selection') return resultContent(document.selectedIds.map((id) => document.objects.find((object) => object.id === id)).filter(Boolean));
+  if (name === 'canvas.get_document') return resultContent({ ...document, appUrl: `http://${host}:${port}` });
   if (name === 'canvas.get_object_info') { const object = document.objects.find((item) => item.id === args.objectId); return resultContent(object ? { object, bounds: objectBounds(object) } : null); }
   if (name === 'canvas.get_children') return resultContent(document.objects.filter((object) => objectParentId(object) === args.objectId));
   if (name === 'canvas.get_tree_summary') {
@@ -329,10 +295,6 @@ async function callTool(name, args = {}) {
     const roots = args.objectId ? document.objects.filter((object) => object.id === args.objectId) : document.objects.filter((object) => !objectParentId(object));
     const summarize = (object, level) => ({ id: object.id, type: object.type, label: object.type === 'frame' ? object.label : object.type === 'text' || object.type === 'comment' ? String(object.text || '').slice(0, 80) : undefined, bounds: objectBounds(object), children: level < depth ? document.objects.filter((child) => objectParentId(child) === object.id).map((child) => summarize(child, level + 1)) : undefined });
     return resultContent(roots.map((object) => summarize(object, 0)));
-  }
-  if (name === 'canvas.get_annotations') {
-    const target = document.objects.find((object) => object.id === args.targetId);
-    return resultContent({ target: target ? { id: target.id, type: target.type, url: target.url } : null, annotations: document.objects.filter((object) => objectParentId(object) === args.targetId && ['text', 'comment', 'arrow', 'stroke'].includes(object.type)).map((object) => object.type === 'arrow' ? { id: object.id, type: 'arrow', from: { x: object.x1, y: object.y1 }, to: { x: object.x2, y: object.y2 } } : object.type === 'stroke' ? { id: object.id, type: 'stroke', bounds: objectBounds(object), points: object.points } : { id: object.id, type: object.type, text: object.text, bounds: objectBounds(object) }) });
   }
   if (name === 'canvas.get_screenshot') {
     const request = {
@@ -352,36 +314,20 @@ async function callTool(name, args = {}) {
       imageData: response.imageData,
     });
   }
-  if (name === 'canvas.get_linked_projects') return resultContent(document.links || []);
-  if (name === 'canvas.create_frame') {
-    const frame = { id: args.id || makeId('frame'), type: 'frame', kind: args.kind || 'plain', x: args.x, y: args.y, width: args.width, height: args.height, label: args.label || 'Frame', background: args.background || (args.kind === 'site' ? '#ffffff' : '#181818'), url: args.url || null, imageData: args.imageData || null, generating: false, priorBounds: null };
-    await applyPatches({ op: 'create', objects: [frame], select: true });
-    return resultContent(frame);
-  }
   if (name === 'canvas.create_objects') {
     const objects = (args.objects || []).map(normalizeCanvasObject).filter(Boolean);
     await applyPatches({ op: 'create', objects, select: args.select !== false });
     return resultContent({ createdIds: objects.map((object) => object.id), objects });
   }
   if (name === 'canvas.update_objects') { await applyPatches(args.updates.map((item) => ({ op: 'update', id: item.id, changes: item.changes }))); return resultContent({ updatedIds: args.updates.map((item) => item.id) }); }
-  if (name === 'canvas.set_text_content') { await applyPatches({ op: 'update', id: args.objectId, changes: { text: args.text } }); return resultContent({ id: args.objectId, text: args.text }); }
-  if (name === 'canvas.move_objects') { const patches = document.objects.filter((object) => args.ids.includes(object.id)).map((object) => ({ op: 'update', id: object.id, changes: shiftObject(object, args.dx, args.dy) })); await applyPatches(patches); return resultContent({ movedIds: patches.map((patch) => patch.id), dx: args.dx, dy: args.dy }); }
   if (name === 'canvas.duplicate_objects') { const offset = args.offset || { x: 24, y: 24 }; const clones = document.objects.filter((object) => args.ids.includes(object.id)).map((object) => shiftObject(object, offset.x || 24, offset.y || 24, makeId(object.type))); await applyPatches({ op: 'create', objects: clones, select: true }); return resultContent({ createdIds: clones.map((object) => object.id) }); }
   if (name === 'canvas.delete_objects') { await applyPatches({ op: 'delete', ids: args.ids }); return resultContent({ deletedIds: args.ids }); }
-  if (name === 'canvas.rename_objects') { await applyPatches(args.items.map((item) => ({ op: 'update', id: item.id, changes: { label: item.name } }))); return resultContent({ renamedIds: args.items.map((item) => item.id) }); }
   if (name === 'canvas.apply_patch') { await applyPatches(args.patch); return resultContent({ ok: true }); }
-  if (name === 'canvas.create_project_preview') {
-    const link = (document.links || []).find((item) => item.id === args.projectId);
-    const bounds = args.bounds || { x: 0, y: 0, width: 1024, height: 768 };
-    const frame = { id: makeId('frame'), type: 'frame', kind: 'site', x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height, label: link?.name ? `${link.name} preview` : 'Project preview', background: '#ffffff', url: args.url, imageData: null, generating: false, priorBounds: null };
-    await writeDocument({ ...document, objects: [...document.objects, frame], selectedIds: [frame.id], links: (document.links || []).map((item) => item.id === args.projectId ? { ...item, previewUrl: args.url } : item), updatedAt: now() });
-    return resultContent(frame);
+  if (name === 'canvas.launch') {
+    const url = `http://${host}:${port}`;
+    openBrowser(url);
+    return resultContent({ app_url: url, opened: process.env.CANVAS_NO_OPEN !== '1', focusObjectId: args.focusObjectId || null });
   }
-  if (name === 'canvas.link_project') { const link = { id: args.id || makeId('proj'), kind: 'local-project', name: args.name, path: args.path, repoRoot: args.repoRoot, previewUrl: args.previewUrl, createdAt: now() }; await writeDocument({ ...document, links: [...(document.links || []).filter((item) => item.id !== link.id), link], updatedAt: now() }); return resultContent(link); }
-  if (name === 'canvas.unlink_project') { await writeDocument({ ...document, links: (document.links || []).filter((link) => link.id !== args.projectId), updatedAt: now() }); return resultContent({ unlinkedId: args.projectId }); }
-  if (name === 'canvas.set_preview_url') { await writeDocument({ ...document, links: (document.links || []).map((link) => link.id === args.projectId ? { ...link, previewUrl: args.previewUrl } : link), updatedAt: now() }); return resultContent({ projectId: args.projectId, previewUrl: args.previewUrl }); }
-  if (name === 'canvas.mark_working') { const ids = Array.from(new Set([...(await readWorkingIds()), ...(args.ids || [])])); await writeWorkingIds(ids); return resultContent({ workingIds: ids }); }
-  if (name === 'canvas.finish_working') { const ids = Array.isArray(args.ids) ? (await readWorkingIds()).filter((id) => !args.ids.includes(id)) : []; await writeWorkingIds(ids); return resultContent({ workingIds: ids }); }
   throw new Error(`Unknown tool: ${name}`);
 }
 function send(message) { process.stdout.write(`${JSON.stringify(message)}\n`); }

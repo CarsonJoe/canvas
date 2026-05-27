@@ -12,10 +12,16 @@ export const documentPath = path.join(canvasDir, 'canvas.json');
 export const screenshotRequestPath = path.join(runtimeDir, 'screenshot-request.json');
 export const screenshotResponsePath = path.join(runtimeDir, 'screenshot-response.json');
 export const logsDir = path.join(runtimeDir, 'logs');
-export const appPort = Number(process.env.CANVAS_PORT ?? 3762);
+export let appPort = Number(process.env.CANVAS_PORT ?? 3762);
 export const appHost = '127.0.0.1';
-export const appUrl = `http://${appHost}:${appPort}`;
-export const mcpHttpUrl = `${appUrl}/mcp`;
+export let appUrl = `http://${appHost}:${appPort}`;
+export let mcpHttpUrl = `${appUrl}/mcp`;
+
+export function setAppPort(port) {
+  appPort = port;
+  appUrl = `http://${appHost}:${port}`;
+  mcpHttpUrl = `${appUrl}/mcp`;
+}
 export const helperVersion = process.env.COGNIBOOM_CANVAS_HELPER_VERSION ?? '0.1.0';
 export const appVersion = process.env.COGNIBOOM_CANVAS_APP_VERSION ?? '0.1.0';
 
@@ -242,8 +248,10 @@ export function objectBounds(object) {
     };
   }
   if (object.type === 'text' || object.type === 'comment') {
-    const fontSize = object.type === 'text' ? object.fontSize : 14;
-    return { x: object.x, y: object.y - fontSize, width: String(object.text ?? '').length * fontSize * 0.6, height: fontSize * 1.2 };
+    const fontSize = object.type === 'text' ? (object.fontSize ?? 24) : 14;
+    const lines = String(object.text ?? '').split('\n');
+    const longestLine = lines.reduce((max, line) => Math.max(max, line.length), 0);
+    return { x: object.x, y: object.y - fontSize, width: longestLine * fontSize * 0.6, height: lines.length * fontSize * 1.4 };
   }
   if (object.type === 'stroke' && Array.isArray(object.points) && object.points.length >= 2) {
     const xs = object.points.filter((_, index) => index % 2 === 0);
