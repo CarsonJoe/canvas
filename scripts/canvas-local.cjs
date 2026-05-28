@@ -4,6 +4,7 @@ const http = require('node:http');
 const path = require('node:path');
 const readline = require('node:readline');
 const { spawn, spawnSync } = require('node:child_process');
+const { pathToFileURL } = require('node:url');
 
 const repoRoot = process.cwd();
 const canvasDir = path.join(repoRoot, '.canvas');
@@ -96,10 +97,84 @@ async function waitForScreenshotResponse(id, timeoutMs = 12000) {
   }
   throw new Error('Timed out waiting for the open Canvas app to capture a screenshot.');
 }
+
+const CONTENT_KINDS = ['html', 'markdown', 'mermaid', 'svg', 'text'];
+const ASSET_EXT_MAP = { markdown: '.md', html: '.html', svg: '.svg', mermaid: '.mermaid', text: '.txt' };
+const FORMAT_FROM_EXT = { '.md': 'markdown', '.html': 'html', '.svg': 'svg', '.mermaid': 'mermaid', '.txt': 'text' };
+async function readAssetSource(id) {
+  for (const [ext, format] of Object.entries(FORMAT_FROM_EXT)) {
+    const filePath = path.join(assetsDir, `${id}${ext}`);
+    try { return { source: await fsp.readFile(filePath, 'utf8'), format, filePath }; } catch { /* try next */ }
+  }
+  return null;
+}
+async function writeAssetSource(id, source, format) {
+  const ext = ASSET_EXT_MAP[format] || '.txt';
+  const filePath = path.join(assetsDir, `${id}${ext}`);
+  ensureDataDirSync();
+  await fsp.writeFile(filePath, source, 'utf8');
+  return filePath;
+}
+let _markedPromise = null;
+function getMarked() {
+  if (!_markedPromise) {
+    const markedPath = pathToFileURL(path.join(repoRoot, 'node_modules', 'marked', 'lib', 'marked.esm.js')).href;
+    _markedPromise = import(markedPath).then((m) => m.marked).catch(() => null);
+  }
+  return _markedPromise;
+}
+async function buildAssetEditorHtml(id, source, format) {
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const base = `body{margin:0;padding:16px;background:#1e1e1e;color:#d4d4d4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.6}`;
+  if (format === 'html') return source;
+  if (format === 'svg') return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{margin:0;padding:12px;background:#1e1e1e;display:flex;align-items:flex-start;justify-content:center}svg{max-width:100%;height:auto}</style></head><body>${source}</body></html>`;
+  if (format === 'mermaid') return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${base}body{display:flex;align-items:flex-start;justify-content:center;padding:12px}.mermaid svg{max-width:100%}</style><script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"><\/script></head><body><div id="m"></div><script>const el=document.getElementById('m');el.className='mermaid';el.textContent=${JSON.stringify(source)};mermaid.initialize({startOnLoad:false,theme:'dark'});mermaid.run({nodes:[el]})<\/script></body></html>`;
+  if (format === 'markdown') {
+    const mdStyles = `${base}h1,h2,h3{color:#fff;margin:.8em 0 .4em}h1{font-size:1.35em;border-bottom:1px solid #333;padding-bottom:.25em}h2{font-size:1.15em}code{background:#2d2d2d;padding:1px 5px;border-radius:3px;font-family:Consolas,monospace;font-size:12px;color:#ce9178}pre{background:#2d2d2d;padding:10px 14px;border-radius:5px;overflow:auto}pre code{background:none;padding:0;color:#d4d4d4}table{border-collapse:collapse;width:100%;margin:6px 0}th,td{border:1px solid #444;padding:5px 10px}th{background:#2d2d2d;color:#fff}tr:nth-child(even){background:#252525}a{color:#4ec9b0}blockquote{border-left:3px solid #4ec9b0;margin:0;padding-left:12px;color:#888}ul,ol{padding-left:20px}strong{color:#fff}p{margin:.4em 0}hr{border:none;border-top:1px solid #333;margin:.8em 0}`;
+    let body = '';
+    try {
+      const markedFn = await getMarked();
+      body = markedFn ? await markedFn.parse(source, { gfm: true, breaks: false }) : `<pre>${esc(source)}</pre>`;
+    } catch { body = `<pre>${esc(source)}</pre>`; }
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${mdStyles}</style></head><body>${body}</body></html>`;
+  }
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${base}body{white-space:pre-wrap;font-family:Consolas,monospace;font-size:13px}</style></head><body>${esc(source)}</body></html>`;
+}
+async function handleAssetRequest(pathname, request, response) {
+  const parts = pathname.replace(/^\/assets\//, '').split('/').filter(Boolean);
+  const id = parts[0];
+  const action = parts[1] || null;
+  const cors = { 'access-control-allow-origin': '*', 'cache-control': 'no-store' };
+  if (!id) { response.writeHead(404); response.end('Not found'); return; }
+  if (action === 'content' && request.method === 'GET') {
+    const asset = await readAssetSource(id);
+    if (!asset) { response.writeHead(404); response.end('Not found'); return; }
+    return sendJson(response, 200, { id, source: asset.source, format: asset.format });
+  }
+  if (action === 'mtime' && request.method === 'GET') {
+    const asset = await readAssetSource(id);
+    if (!asset) { response.writeHead(404); response.end('Not found'); return; }
+    const stat = await fsp.stat(asset.filePath);
+    return sendJson(response, 200, { id, mtime: stat.mtimeMs });
+  }
+  if (action === 'save' && request.method === 'POST') {
+    const body = JSON.parse(await readBody(request));
+    const existing = await readAssetSource(id);
+    await writeAssetSource(id, body.source, body.format || existing?.format || 'markdown');
+    return sendJson(response, 200, { ok: true });
+  }
+  const asset = await readAssetSource(id);
+  if (!asset) { response.writeHead(404); response.end('Asset not found'); return; }
+  const html = await buildAssetEditorHtml(id, asset.source, asset.format);
+  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', ...cors });
+  response.end(html);
+}
+
 function normalizeCanvasObject(object) {
   if (!object || typeof object !== 'object') return null;
   const id = typeof object.id === 'string' && object.id ? object.id : makeId(object.type || 'object');
   if (object.type === 'frame') {
+    const isContent = CONTENT_KINDS.includes(object.kind);
     return {
       id,
       type: 'frame',
@@ -114,6 +189,8 @@ function normalizeCanvasObject(object) {
       imageData: object.imageData ?? null,
       generating: false,
       priorBounds: object.priorBounds ?? null,
+      ...(isContent && typeof object.source === 'string' ? { source: object.source } : {}),
+      ...(isContent && object.flatten != null ? { flatten: !!object.flatten } : {}),
     };
   }
   if (object.type === 'text') {
@@ -258,6 +335,8 @@ function createAppServer() {
       else if (url.pathname === '/api/patch' && request.method === 'POST') sendJson(response, 200, await applyPatches(JSON.parse(await readBody(request))));
       else if (url.pathname === '/api/screenshot-request' && request.method === 'GET') sendJson(response, 200, { request: await readScreenshotRequest() });
       else if (url.pathname === '/api/screenshot-response' && request.method === 'POST') sendJson(response, 200, await writeScreenshotResponse(JSON.parse(await readBody(request))));
+      else if (url.pathname === '/api/changes' && request.method === 'GET') sendJson(response, 200, { changes: [], seq: 0 });
+      else if (/^\/assets\/[\w-]+(\/|$)/.test(url.pathname)) await handleAssetRequest(url.pathname, request, response);
       else await serveStatic(request, response);
     } catch (error) { sendJson(response, 500, { error: error.message || String(error) }); }
   });
@@ -316,10 +395,28 @@ async function callTool(name, args = {}) {
   }
   if (name === 'canvas.create_objects') {
     const objects = (args.objects || []).map(normalizeCanvasObject).filter(Boolean);
+    for (const object of objects) {
+      if (object.type === 'frame' && CONTENT_KINDS.includes(object.kind) && typeof object.source === 'string') {
+        await writeAssetSource(object.id, object.source, object.kind);
+        object.url = `/assets/${object.id}`;
+      }
+    }
     await applyPatches({ op: 'create', objects, select: args.select !== false });
     return resultContent({ createdIds: objects.map((object) => object.id), objects });
   }
-  if (name === 'canvas.update_objects') { await applyPatches(args.updates.map((item) => ({ op: 'update', id: item.id, changes: item.changes }))); return resultContent({ updatedIds: args.updates.map((item) => item.id) }); }
+  if (name === 'canvas.update_objects') {
+    await applyPatches(args.updates.map((item) => ({ op: 'update', id: item.id, changes: item.changes })));
+    for (const item of args.updates) {
+      if (item.changes && typeof item.changes.source === 'string') {
+        const doc = await readDocument();
+        const obj = doc.objects.find((o) => o.id === item.id);
+        if (obj && obj.type === 'frame' && CONTENT_KINDS.includes(obj.kind)) {
+          await writeAssetSource(item.id, item.changes.source, obj.kind);
+        }
+      }
+    }
+    return resultContent({ updatedIds: args.updates.map((item) => item.id) });
+  }
   if (name === 'canvas.duplicate_objects') { const offset = args.offset || { x: 24, y: 24 }; const clones = document.objects.filter((object) => args.ids.includes(object.id)).map((object) => shiftObject(object, offset.x || 24, offset.y || 24, makeId(object.type))); await applyPatches({ op: 'create', objects: clones, select: true }); return resultContent({ createdIds: clones.map((object) => object.id) }); }
   if (name === 'canvas.delete_objects') { await applyPatches({ op: 'delete', ids: args.ids }); return resultContent({ deletedIds: args.ids }); }
   if (name === 'canvas.apply_patch') { await applyPatches(args.patch); return resultContent({ ok: true }); }

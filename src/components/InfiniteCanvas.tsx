@@ -2429,7 +2429,7 @@ export default function InfiniteCanvas() {
         return 0;
       });
   }, [objects, selectedIdSet, contextFrameIdSet, viewportBounds]);
-  const CONTENT_ASSET_KINDS = ['html', 'markdown', 'mermaid', 'svg'] as const;
+  const CONTENT_ASSET_KINDS = ['html', 'markdown', 'mermaid', 'svg', 'text'] as const;
   const isContentAsset = (obj: CanvasObject): obj is FrameObject =>
     obj.type === 'frame' && CONTENT_ASSET_KINDS.includes(obj.kind as never) && !!obj.url && !(obj as FrameObject).flatten;
 

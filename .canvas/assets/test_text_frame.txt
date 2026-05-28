@@ -1,0 +1,10 @@
+canvas serve    # stdio MCP + local web app (default)
+canvas http     # HTTP MCP + local web app
+canvas setup    # interactive MCP client setup guide
+canvas doctor   # diagnostics & health check
+canvas version  # version info
+
+Dev workflow:
+  npm run mcp        # MCP server (reads local canvas-local.cjs)
+  npm run dev        # Vite dev server with hot reload
+  npm run dev:server # HTTP only, no MCP

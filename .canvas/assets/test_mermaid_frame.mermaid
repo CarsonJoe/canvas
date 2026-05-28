@@ -1,0 +1,8 @@
+graph TD
+  MCPClient[MCP Client] -->|stdio or HTTP| Server[canvas-local.cjs]
+  Server -->|read and write| Doc[canvas.json]
+  Server -->|serves| Assets[assets endpoint]
+  Assets -->|renders| Content[markdown, HTML, SVG]
+  Server -->|HTTP| App[React App]
+  App -->|LocalDocumentBridge| Doc
+  App -->|iframe src| Assets

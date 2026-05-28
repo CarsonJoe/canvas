@@ -113,7 +113,7 @@ export interface CommentObject {
   createdAt: string;
 }
 
-export type ContentFrameKind = 'html' | 'markdown' | 'mermaid' | 'svg';
+export type ContentFrameKind = 'html' | 'markdown' | 'mermaid' | 'svg' | 'text';
 
 export interface FrameObject {
   id: string;

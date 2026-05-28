@@ -376,7 +376,7 @@ function sanitizePersistedState(value: unknown): Partial<CanvasState> {
   const state = value as Partial<CanvasState>;
   return {
     ...state,
-    theme: state.theme === 'light' ? 'light' : 'dark',
+    theme: (state.theme === 'light' || state.theme === 'dark') ? state.theme : 'light',
     objects: sanitizeObjects(Array.isArray(state.objects) ? state.objects : []),
     selectedIds: Array.isArray(state.selectedIds) && Array.isArray(state.objects)
       ? filterSelectedIds(state.selectedIds, state.objects)

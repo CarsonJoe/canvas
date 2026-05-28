@@ -11,7 +11,8 @@
     "pack:mcp-package": "npm run build:mcp-package && node scripts/pack-canvas-mcp-package.mjs",
     "app": "npm run build && node -e \"process.env.CANVAS_MODE='app';eval(require('fs').readFileSync('scripts/canvas-local.cjs','utf8'))\"",
     "app:no-open": "npm run build && node -e \"process.env.CANVAS_MODE='app';process.env.CANVAS_NO_OPEN='1';eval(require('fs').readFileSync('scripts/canvas-local.cjs','utf8'))\"",
-    "mcp": "node -e \"process.env.CANVAS_MODE='mcp';eval(require('fs').readFileSync('scripts/canvas-local.cjs','utf8'))\""
+    "mcp": "node -e \"process.env.CANVAS_MODE='mcp';eval(require('fs').readFileSync('scripts/canvas-local.cjs','utf8'))\"",
+    "dev:server": "node -e \"process.env.CANVAS_MODE='app';process.env.CANVAS_NO_OPEN='1';eval(require('fs').readFileSync('scripts/canvas-local.cjs','utf8'))\""
   },
   "dependencies": {
     "clsx": "^2.1.1",
